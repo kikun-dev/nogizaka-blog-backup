@@ -186,6 +186,8 @@ async function readJson(filePath, fallback) {
 }
 
 async function replaceFile(source, destination) {
+  const backup = `${destination}.bak`;
+
   try {
     await rename(source, destination);
   } catch (error) {
@@ -196,11 +198,28 @@ async function replaceFile(source, destination) {
       throw error;
     }
 
-    await rm(destination, {
+    await rm(backup, {
       force: true,
     });
 
-    await rename(source, destination);
+    let hasBackup = false;
+
+    try {
+      await rename(destination, backup);
+      hasBackup = true;
+
+      await rename(source, destination);
+    } catch (replaceError) {
+      if (hasBackup) {
+        await rename(backup, destination).catch(() => {});
+      }
+
+      throw replaceError;
+    } finally {
+      await rm(backup, {
+        force: true,
+      });
+    }
   }
 }
 

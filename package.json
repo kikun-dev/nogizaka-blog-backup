@@ -1,13 +1,21 @@
 {
   "name": "nogizaka-blog-backup",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Archive Nogizaka46 official blog posts as PDF and MHTML files.",
   "scripts": {
     "archive": "node archive-nogizaka-blog.mjs",
-    "check": "node --check archive-nogizaka-blog.mjs"
+    "check": "node --check archive-nogizaka-blog.mjs",
+    "test": "npm run check"
   },
-  "keywords": [],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kikun-dev/nogizaka-blog-backup.git"
+  },
+  "keywords": [
+    "nogizaka46",
+    "archive",
+    "playwright"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
