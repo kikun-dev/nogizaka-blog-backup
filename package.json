@@ -1,0 +1,17 @@
+{
+  "name": "nogizaka-blog-backup",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "archive": "node archive-nogizaka-blog.mjs",
+    "check": "node --check archive-nogizaka-blog.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}
