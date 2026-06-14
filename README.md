@@ -1,6 +1,14 @@
-# nogizaka-blog-backup
+# sakamichi-blog-backup
 
-乃木坂46公式ブログの記事を、メンバーごとに PDF と MHTML で保存するための Node.js スクリプトです。
+乃木坂46・櫻坂46・日向坂46の公式ブログ記事を、PDF と MHTML で保存するための Node.js スクリプトです。
+
+保存先は指定した出力ルートの下に、グループ別フォルダとして作成されます。
+
+- `Nogizaka/`
+- `Sakurazaka/`
+- `Hinatazaka/`
+
+各グループ配下にはメンバー名のフォルダが作成され、記事ごとの `.pdf` と `.mhtml`、処理済み記事を記録する `index.json` が保存されます。
 
 ## Requirements
 
@@ -21,7 +29,17 @@ npx playwright install chromium
 ```bash
 npm run archive -- \
   --url 'https://www.nogizaka46.com/s/n46/diary/detail/記事ID' \
-  --output '/mnt/c/Users/Windowsユーザー名/Documents/NogizakaBlogArchive'
+  --output '/mnt/c/Users/Windowsユーザー名/Documents/SakamichiBlogArchive'
+```
+
+開始URLからグループは自動判定されます。
+
+対応URL例:
+
+```text
+https://www.nogizaka46.com/s/n46/diary/detail/104598?cd=MEMBER
+https://sakurazaka46.com/s/s46/diary/detail/68997?cd=blog
+https://www.hinatazaka46.com/s/official/diary/detail/69468?cd=member
 ```
 
 主なオプション:
@@ -30,8 +48,6 @@ npm run archive -- \
 - `--delay 5000`: 記事間を5秒空ける
 - `--headed`: ブラウザ画面を表示する
 - `--force`: 既存ファイルを上書きする
-
-保存先にはメンバー名のフォルダが作成され、各記事の `.pdf` と `.mhtml`、処理済み記事を記録する `index.json` が保存されます。
 
 ## Check
 

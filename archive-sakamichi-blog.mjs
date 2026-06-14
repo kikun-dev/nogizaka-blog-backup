@@ -12,12 +12,46 @@ import path from "node:path";
 const DEFAULT_LIMIT = 10_000;
 const DEFAULT_DELAY_MS = 3_000;
 
+const GROUPS = [
+  {
+    key: "nogizaka",
+    directory: "Nogizaka",
+    label: "乃木坂46",
+    hosts: ["www.nogizaka46.com", "nogizaka46.com"],
+    pathPattern: /^\/s\/n46\/diary\/detail\/\d+\/?$/,
+    canonicalCd: "MEMBER",
+    previousLabels: ["前の記事", "前へ"],
+  },
+  {
+    key: "sakurazaka",
+    directory: "Sakurazaka",
+    label: "櫻坂46",
+    hosts: ["sakurazaka46.com", "www.sakurazaka46.com"],
+    pathPattern: /^\/s\/s46\/diary\/detail\/\d+\/?$/,
+    canonicalCd: "blog",
+    previousLabels: ["前へ", "前の記事"],
+  },
+  {
+    key: "hinatazaka",
+    directory: "Hinatazaka",
+    label: "日向坂46",
+    hosts: ["www.hinatazaka46.com", "hinatazaka46.com"],
+    pathPattern: /^\/s\/official\/diary\/detail\/\d+\/?$/,
+    canonicalCd: "member",
+    previousLabels: ["前へ", "前の記事"],
+  },
+];
+
+const GROUP_BY_KEY = new Map(
+  GROUPS.map((group) => [group.key, group]),
+);
+
 function usage() {
   console.log(`
 使い方:
-  node archive-nogizaka-blog.mjs \\
+  node archive-sakamichi-blog.mjs \\
     --url '最新ブログURL' \\
-    --output '/mnt/c/Users/Windowsユーザー名/Documents/NogizakaBlogArchive'
+    --output '/mnt/c/Users/Windowsユーザー名/Documents/SakamichiBlogArchive'
 
 オプション:
   --limit 3     3記事だけ処理する
@@ -94,23 +128,49 @@ const sleep = (ms) =>
     setTimeout(resolve, ms);
   });
 
-function normalizeArticleUrl(rawUrl, baseUrl) {
+function detectGroup(url) {
+  const group = GROUPS.find(
+    (candidate) =>
+      candidate.hosts.includes(url.hostname) &&
+      candidate.pathPattern.test(url.pathname),
+  );
+
+  if (!group) {
+    throw new Error(
+      [
+        "対応している坂道公式ブログの記事URLではありません:",
+        url.toString(),
+      ].join(" "),
+    );
+  }
+
+  return group;
+}
+
+function normalizeArticleUrl(
+  rawUrl,
+  baseUrl,
+  expectedGroupKey,
+) {
   const url = new URL(rawUrl, baseUrl);
+  const group = detectGroup(url);
 
   if (
-    url.hostname !== "www.nogizaka46.com" ||
-    !/^\/s\/n46\/diary\/detail\/\d+\/?$/.test(url.pathname)
+    expectedGroupKey &&
+    group.key !== expectedGroupKey
   ) {
     throw new Error(
-      `乃木坂46公式ブログの記事URLではありません: ${url}`,
+      [
+        `別グループの記事へ移動したため停止します: ${group.label}`,
+        `期待: ${GROUP_BY_KEY.get(expectedGroupKey)?.label}`,
+      ].join(" "),
     );
   }
 
   // アクセスごとに変化する不要なパラメータを除去する。
   url.searchParams.delete("ima");
 
-  // メンバー別の記事として開く。
-  url.searchParams.set("cd", "MEMBER");
+  url.searchParams.set("cd", group.canonicalCd);
 
   url.hash = "";
 
@@ -138,7 +198,7 @@ function toWslWindowsPath(input) {
   throw new Error(
     [
       "保存先はWindows側を指定してください。",
-      "例: /mnt/c/Users/name/Documents/NogizakaBlogArchive",
+      "例: /mnt/c/Users/name/Documents/SakamichiBlogArchive",
     ].join(" "),
   );
 }
@@ -277,22 +337,20 @@ async function scrollAndWaitForImages(page) {
   // ブログ本文の画像が読み込まれるまで待つ。
   await page
     .waitForFunction(
-      () =>
-        [...document.images]
-          .filter((image) =>
-            [
-              image.currentSrc,
-              image.src,
-              image.dataset.src,
-              image.dataset.original,
-            ].some((source) =>
-              source?.includes("/files/46/diary/"),
-            ),
-          )
-          .every(
-            (image) =>
-              image.complete && image.naturalWidth > 0,
-          ),
+      () => {
+        const root =
+          document.querySelector(".bd--edit") ??
+          document.querySelector(".box-article") ??
+          document.querySelector(".c-blog-article__text") ??
+          document.querySelector(".p-blog-article") ??
+          document.querySelector("article") ??
+          document.body;
+
+        return [...root.querySelectorAll("img")].every(
+          (image) =>
+            image.complete && image.naturalWidth > 0,
+        );
+      },
       undefined,
       {
         timeout: 30_000,
@@ -311,7 +369,15 @@ async function scrollAndWaitForImages(page) {
 
 async function imageStats(page) {
   return page.evaluate(() => {
-    const images = [...document.images]
+    const root =
+      document.querySelector(".bd--edit") ??
+      document.querySelector(".box-article") ??
+      document.querySelector(".c-blog-article__text") ??
+      document.querySelector(".p-blog-article") ??
+      document.querySelector("article") ??
+      document.body;
+
+    const images = [...root.querySelectorAll("img")]
       .map((image) => {
         const source =
           [
@@ -320,7 +386,7 @@ async function imageStats(page) {
             image.dataset.src,
             image.dataset.original,
           ].find((candidate) =>
-            candidate?.includes("/files/46/diary/"),
+            Boolean(candidate),
           ) || "";
 
         return {
@@ -329,9 +395,7 @@ async function imageStats(page) {
             image.complete && image.naturalWidth > 0,
         };
       })
-      .filter(({ source }) =>
-        source.includes("/files/46/diary/"),
-      );
+      .filter(({ source }) => source);
 
     return {
       detected: images.length,
@@ -496,8 +560,8 @@ async function openArticle(page, url) {
   throw lastError;
 }
 
-async function getMetadata(page) {
-  return page.evaluate(() => {
+async function getMetadata(page, group) {
+  return page.evaluate((previousLabels) => {
     const text = (value) =>
       (value ?? "").replace(/\s+/g, " ").trim();
 
@@ -505,7 +569,12 @@ async function getMetadata(page) {
       ...document.querySelectorAll("a[href]"),
     ];
 
-    const author = anchors.find((anchor) => {
+    const removeBlogSuffix = (value) =>
+      text(value)
+        .replace(/\s*公式ブログ\s*/g, "")
+        .trim();
+
+    const authorLink = anchors.find((anchor) => {
       const anchorText = text(anchor.textContent);
 
       return (
@@ -514,24 +583,54 @@ async function getMetadata(page) {
       );
     });
 
-    const previous = anchors.find(
-      (anchor) =>
-        text(anchor.textContent) === "前の記事",
-    );
+    const blogHeading = [
+      ...document.querySelectorAll("h1,h2,h3,a,span,p,div"),
+    ].find((element) => {
+      const value = text(element.textContent);
+
+      return (
+        value.includes("公式ブログ") &&
+        value.length <= 80
+      );
+    });
+
+    const previous =
+      anchors.find((anchor) =>
+        previousLabels.includes(text(anchor.textContent)),
+      ) ||
+      anchors.find(
+        (anchor) =>
+          anchor.href.includes("/diary/detail/") &&
+          anchor.closest(
+            ".c-pager__item--prev, .pager-prev, [class*='prev']",
+          ),
+      );
 
     const dateMatch = document.body.innerText.match(
       /\b(20\d{2})[./年](\d{1,2})[./月](\d{1,2})(?:日)?(?:\s+\d{1,2}:\d{2})?/,
     );
 
-    return {
-      title: text(
-        document.querySelector("h1")?.textContent,
-      ),
+    const title =
+      text(document.querySelector("h1")?.textContent) ||
+      text(
+        document.querySelector(".c-blog-article__title")
+          ?.textContent,
+      );
 
-      memberName: text(author?.textContent).replace(
-        /\s*公式ブログ\s*/g,
+    const memberName =
+      text(
+        document.querySelector(".c-blog-article__name")
+          ?.textContent,
+      ) ||
+      removeBlogSuffix(authorLink?.textContent) ||
+      removeBlogSuffix(blogHeading?.textContent).replace(
+        /^OFFICIAL BLOG\s*/,
         "",
-      ),
+      );
+
+    return {
+      title,
+      memberName,
 
       date: dateMatch
         ? [
@@ -543,7 +642,7 @@ async function getMetadata(page) {
 
       previousUrl: previous?.href ?? null,
     };
-  });
+  }, group.previousLabels);
 }
 
 async function saveMhtml(
@@ -641,11 +740,22 @@ async function main() {
     process.argv.slice(2),
   );
 
+  const group = detectGroup(
+    new URL(options.url),
+  );
+
   const startUrl =
-    normalizeArticleUrl(options.url);
+    normalizeArticleUrl(
+      options.url,
+      undefined,
+      group.key,
+    );
 
   const outputRoot =
-    toWslWindowsPath(options.output);
+    path.join(
+      toWslWindowsPath(options.output),
+      group.directory,
+    );
 
   await mkdir(outputRoot, {
     recursive: true,
@@ -691,10 +801,14 @@ async function main() {
         );
 
       const metadata =
-        await getMetadata(page);
+        await getMetadata(page, group);
 
       const articleUrl =
-        normalizeArticleUrl(page.url());
+        normalizeArticleUrl(
+          page.url(),
+          undefined,
+          group.key,
+        );
 
       const articleId =
         articleUrl.match(
@@ -703,11 +817,10 @@ async function main() {
 
       if (
         !articleId ||
-        !metadata.title ||
         !metadata.memberName
       ) {
         throw new Error(
-          "記事ID・タイトル・メンバー名の取得に失敗しました。",
+          "記事ID・メンバー名の取得に失敗しました。",
         );
       }
 
@@ -744,6 +857,8 @@ async function main() {
           indexPath,
           {
             memberName: expectedMember,
+            group: group.key,
+            groupName: group.label,
             startUrl,
             posts: [],
           },
@@ -760,6 +875,10 @@ async function main() {
             `保存先は別メンバー用です: ${index.memberName}`,
           );
         }
+
+        console.log(
+          `グループ: ${group.label}`,
+        );
 
         console.log(
           `メンバー: ${expectedMember}`,
@@ -840,7 +959,7 @@ async function main() {
 
       const record = {
         id: articleId,
-        title: metadata.title,
+        title: metadata.title || "untitled",
         date: metadata.date,
         url: articleUrl,
         pdf: path.basename(pdfPath),
@@ -865,6 +984,10 @@ async function main() {
       index.memberName =
         expectedMember;
 
+      index.group = group.key;
+
+      index.groupName = group.label;
+
       index.updatedAt =
         new Date().toISOString();
 
@@ -888,6 +1011,7 @@ async function main() {
         normalizeArticleUrl(
           metadata.previousUrl,
           articleUrl,
+          group.key,
         );
 
       await sleep(options.delay);

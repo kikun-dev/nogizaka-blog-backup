@@ -1,10 +1,10 @@
 {
-  "name": "nogizaka-blog-backup",
+  "name": "sakamichi-blog-backup",
   "version": "1.0.0",
-  "description": "Archive Nogizaka46 official blog posts as PDF and MHTML files.",
+  "description": "Archive Nogizaka46, Sakurazaka46, and Hinatazaka46 official blog posts as PDF and MHTML files.",
   "scripts": {
-    "archive": "node archive-nogizaka-blog.mjs",
-    "check": "node --check archive-nogizaka-blog.mjs",
+    "archive": "node archive-sakamichi-blog.mjs",
+    "check": "node --check archive-sakamichi-blog.mjs",
     "test": "npm run check"
   },
   "repository": {
@@ -12,7 +12,10 @@
     "url": "https://github.com/kikun-dev/nogizaka-blog-backup.git"
   },
   "keywords": [
+    "sakamichi",
     "nogizaka46",
+    "sakurazaka46",
+    "hinatazaka46",
     "archive",
     "playwright"
   ],
