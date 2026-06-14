@@ -547,10 +547,22 @@ async function openArticle(page, url) {
         throw new Error(`HTTP ${response.status()}`);
       }
 
-      await page.locator("h1").first().waitFor({
-        state: "visible",
-        timeout: 30_000,
-      });
+      await page
+        .locator(
+          [
+            ".bd--edit",
+            ".box-article",
+            ".c-blog-article__text",
+            ".p-blog-article",
+            ".blog-foot",
+            ".c-blog-article__date",
+          ].join(","),
+        )
+        .first()
+        .waitFor({
+          state: "visible",
+          timeout: 30_000,
+        });
 
       await page
         .waitForLoadState("networkidle", {
