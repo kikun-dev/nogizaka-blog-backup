@@ -586,7 +586,7 @@ async function openArticle(page, url) {
 }
 
 async function getMetadata(page, group) {
-  return page.evaluate((previousLabels) => {
+  return page.evaluate(({ previousLabels }) => {
     const text = (value) =>
       (value ?? "").replace(/\s+/g, " ").trim();
 
@@ -631,7 +631,22 @@ async function getMetadata(page, group) {
           ),
       );
 
-    const dateMatch = document.body.innerText.match(
+    const articleDateText =
+      [
+        ".c-blog-article__date",
+        ".blog-foot .date",
+        ".bd--hd__date",
+        "time",
+      ]
+        .map((selector) =>
+          text(
+            document.querySelector(selector)
+              ?.textContent,
+          ),
+        )
+        .find(Boolean) || document.body.innerText;
+
+    const dateMatch = articleDateText.match(
       /\b(20\d{2})[./年](\d{1,2})[./月](\d{1,2})(?:日)?(?:\s+\d{1,2}:\d{2})?/,
     );
 
@@ -667,7 +682,9 @@ async function getMetadata(page, group) {
 
       previousUrl: previous?.href ?? null,
     };
-  }, group.previousLabels);
+  }, {
+    previousLabels: group.previousLabels,
+  });
 }
 
 async function saveMhtml(
