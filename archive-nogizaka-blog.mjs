@@ -341,6 +341,109 @@ async function imageStats(page) {
   });
 }
 
+async function prepareArchiveView(page) {
+  await page.evaluate(() => {
+    const style = document.createElement("style");
+
+    style.textContent = `
+      html,
+      body {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+      }
+
+      #js-wrap,
+      #js-cont,
+      .b--mn,
+      .bd--mc,
+      .bd--ctt,
+      .bd--ctt__in,
+      .bd--mn,
+      .bd--edit {
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        transform: none !important;
+      }
+
+      #js-wrap,
+      #js-cont {
+        position: static !important;
+        width: 100% !important;
+      }
+
+      .b--gh,
+      .b--ld,
+      .b--ptb,
+      .b--snv,
+      .b--hm,
+      .b--ph,
+      .bd--aside {
+        display: none !important;
+      }
+
+      .bd--ctt {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+      }
+
+      .bd--ctt__in,
+      .bd--mn,
+      .bd--edit {
+        width: calc(100% - 48px) !important;
+        max-width: 760px !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+      }
+
+      .bd--edit img,
+      .bd--edit picture,
+      .bd--edit figure {
+        max-width: 100% !important;
+        height: auto !important;
+        break-inside: avoid !important;
+      }
+
+      @media print {
+        .bd--edit {
+          width: 100% !important;
+          max-width: none !important;
+        }
+      }
+    `;
+
+    document.head.append(style);
+
+    window.scrollTo(0, 0);
+
+    document
+      .querySelectorAll(".b--gh")
+      .forEach((element) => {
+        element.remove();
+      });
+
+    [
+      "#js-wrap",
+      "#js-cont",
+      ".js-st",
+      ".js-st-win",
+    ].forEach((selector) => {
+      document
+        .querySelectorAll(selector)
+        .forEach((element) => {
+          element.style.transform = "none";
+          element.style.height = "auto";
+          element.style.minHeight = "0";
+          element.style.overflow = "visible";
+        });
+    });
+  });
+
+  await page.waitForTimeout(500);
+}
+
 async function openArticle(page, url) {
   let lastError;
 
@@ -694,6 +797,8 @@ async function main() {
         memberDirectory,
         `${baseName}.mhtml`,
       );
+
+      await prepareArchiveView(page);
 
       // 通常表示の状態を先にMHTMLとして保存する。
       if (
