@@ -444,7 +444,15 @@ async function prepareArchiveView(page) {
       .b--snv,
       .b--hm,
       .b--ph,
-      .bd--aside {
+      .bd--aside,
+      #onetrust-banner-sdk,
+      #onetrust-consent-sdk,
+      #onetrust-pc-sdk,
+      .onetrust-pc-dark-filter,
+      .ot-sdk-container,
+      .otFlat,
+      [class*="onetrust"],
+      [id*="onetrust"] {
         display: none !important;
       }
 
@@ -484,6 +492,23 @@ async function prepareArchiveView(page) {
 
     document
       .querySelectorAll(".b--gh")
+      .forEach((element) => {
+        element.remove();
+      });
+
+    document
+      .querySelectorAll(
+        [
+          "#onetrust-banner-sdk",
+          "#onetrust-consent-sdk",
+          "#onetrust-pc-sdk",
+          ".onetrust-pc-dark-filter",
+          ".ot-sdk-container",
+          ".otFlat",
+          "[class*='onetrust']",
+          "[id*='onetrust']",
+        ].join(","),
+      )
       .forEach((element) => {
         element.remove();
       });
