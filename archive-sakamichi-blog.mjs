@@ -448,22 +448,35 @@ async function prepareArchiveView(page) {
       .b--hm,
       .b--ph,
       .bd--aside,
+      .bd--cmt,
+      #comment,
+      footer,
       header,
       .drawer-nav,
       .head-logo,
       .com-hero,
       .com-hero-title,
+      .blog-top,
+      .blog-top .col-r,
+      .blog-top .com-blog-circle,
       .blog-wdget-area,
       .blog-prof-r,
       .blog-foot-nav,
+      .app-button,
+      .app-title,
       .app-area,
       .box-app,
       .p-blog-profile,
       .p-blog-entry,
       .p-blog-face,
+      .l-footer,
       .l-header,
       .c-header,
       .p-header,
+      .b--ft__mn,
+      .b--ec,
+      .b--ev,
+      .b--em,
       [class*="drawer"],
       [class*="hamburger"],
       #onetrust-banner-sdk,
@@ -532,6 +545,17 @@ async function prepareArchiveView(page) {
         element.remove();
       });
 
+    const removeElements = (selectors) => {
+      document
+        .querySelectorAll(selectors.join(","))
+        .forEach((element) => {
+          element.remove();
+        });
+    };
+
+    const text = (value) =>
+      (value ?? "").replace(/\s+/g, " ").trim();
+
     document
       .querySelectorAll(
         [
@@ -541,22 +565,34 @@ async function prepareArchiveView(page) {
           ".onetrust-pc-dark-filter",
           ".ot-sdk-container",
           ".otFlat",
+          "footer",
           "header",
           ".drawer-nav",
           ".head-logo",
           ".com-hero",
           ".com-hero-title",
+          ".blog-top",
+          ".blog-top .col-r",
+          ".blog-top .com-blog-circle",
           ".blog-wdget-area",
           ".blog-prof-r",
           ".blog-foot-nav",
+          ".bd--cmt",
+          "#comment",
+          ".app-button",
           ".app-area",
           ".box-app",
           ".p-blog-profile",
           ".p-blog-entry",
           ".p-blog-face",
+          ".l-footer",
           ".l-header",
           ".c-header",
           ".p-header",
+          ".b--ft__mn",
+          ".b--ec",
+          ".b--ev",
+          ".b--em",
           "[class*='drawer']",
           "[class*='hamburger']",
           "[class*='onetrust']",
@@ -566,6 +602,31 @@ async function prepareArchiveView(page) {
       .forEach((element) => {
         element.remove();
       });
+
+    document.querySelectorAll(".app-title").forEach((element) => {
+      const appBanner = element.closest(".app-button");
+
+      (appBanner ?? element).remove();
+    });
+
+    document
+      .querySelectorAll(".p-blog-entry__group")
+      .forEach((element) => {
+        const subtitle = text(
+          element.querySelector(".c-blog-entry_area__subtitle")
+            ?.textContent,
+        );
+
+        if (/^(乃木坂46|櫻坂46|日向坂46)の?$/.test(subtitle)) {
+          element.remove();
+        }
+      });
+
+    removeElements([
+      ".bd--cmt__carea",
+      ".bd--cmt__list",
+      ".bd--cmt__pg",
+    ]);
 
     [
       "#js-wrap",
