@@ -7,6 +7,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 
 const DEFAULT_LIMIT = 10_000;
@@ -51,7 +52,7 @@ function usage() {
 使い方:
   node archive-sakamichi-blog.mjs \\
     --url '最新ブログURL' \\
-    --output '/mnt/c/Users/Windowsユーザー名/Documents/SakamichiBlogArchive'
+    --output '~/Documents/SakamichiBlogArchive'
 
 オプション:
   --limit 3     3記事だけ処理する
@@ -177,8 +178,12 @@ function normalizeArticleUrl(
   return url.toString();
 }
 
-function toWslWindowsPath(input) {
+function resolveOutputPath(input) {
   const value = input.trim();
+
+  if (!value) {
+    throw new Error("保存先を指定してください。");
+  }
 
   // C:\Users\name\... の形式にも対応する。
   const windowsPath = value.match(/^([A-Za-z]):[\\/](.*)$/);
@@ -190,17 +195,15 @@ function toWslWindowsPath(input) {
     return path.resolve(`/mnt/${drive}/${rest}`);
   }
 
-  // WSL形式のWindowsパス。
-  if (/^\/mnt\/[A-Za-z](?:\/|$)/.test(value)) {
-    return path.resolve(value);
+  if (value === "~") {
+    return homedir();
   }
 
-  throw new Error(
-    [
-      "保存先はWindows側を指定してください。",
-      "例: /mnt/c/Users/name/Documents/SakamichiBlogArchive",
-    ].join(" "),
-  );
+  if (value.startsWith("~/")) {
+    return path.resolve(homedir(), value.slice(2));
+  }
+
+  return path.resolve(value);
 }
 
 function safeName(value, maxLength = 100) {
@@ -1007,7 +1010,7 @@ async function main() {
 
   const outputRoot =
     path.join(
-      toWslWindowsPath(options.output),
+      resolveOutputPath(options.output),
       group.directory,
     );
 

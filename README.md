@@ -15,7 +15,6 @@
 - Node.js 18+
 - npm
 - Playwright Chromium
-- WSL から Windows 側の保存先に書き込める環境
 
 ## Setup
 
@@ -29,8 +28,10 @@ npx playwright install chromium
 ```bash
 npm run archive -- \
   --url 'https://www.nogizaka46.com/s/n46/diary/detail/記事ID' \
-  --output '/mnt/c/Users/Windowsユーザー名/Documents/SakamichiBlogArchive'
+  --output '~/Documents/SakamichiBlogArchive'
 ```
+
+WSL から Windows 側に保存する場合は、従来通り `/mnt/c/...` または `C:\...` 形式も指定できます。
 
 開始URLからグループは自動判定されます。
 
