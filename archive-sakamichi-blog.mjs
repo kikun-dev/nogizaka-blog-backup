@@ -425,7 +425,10 @@ async function prepareArchiveView(page) {
       .bd--ctt,
       .bd--ctt__in,
       .bd--mn,
-      .bd--edit {
+      .bd--edit,
+      .box-article,
+      .p-blog-article,
+      .c-blog-article__text {
         height: auto !important;
         min-height: 0 !important;
         overflow: visible !important;
@@ -445,6 +448,24 @@ async function prepareArchiveView(page) {
       .b--hm,
       .b--ph,
       .bd--aside,
+      header,
+      .drawer-nav,
+      .head-logo,
+      .com-hero,
+      .com-hero-title,
+      .blog-wdget-area,
+      .blog-prof-r,
+      .blog-foot-nav,
+      .app-area,
+      .box-app,
+      .p-blog-profile,
+      .p-blog-entry,
+      .p-blog-face,
+      .l-header,
+      .c-header,
+      .p-header,
+      [class*="drawer"],
+      [class*="hamburger"],
       #onetrust-banner-sdk,
       #onetrust-consent-sdk,
       #onetrust-pc-sdk,
@@ -463,7 +484,10 @@ async function prepareArchiveView(page) {
 
       .bd--ctt__in,
       .bd--mn,
-      .bd--edit {
+      .bd--edit,
+      .box-article,
+      .p-blog-article,
+      .c-blog-article__text {
         width: calc(100% - 48px) !important;
         max-width: 760px !important;
         margin-left: auto !important;
@@ -471,15 +495,27 @@ async function prepareArchiveView(page) {
       }
 
       .bd--edit img,
+      .box-article img,
+      .p-blog-article img,
+      .c-blog-article__text img,
       .bd--edit picture,
-      .bd--edit figure {
+      .box-article picture,
+      .p-blog-article picture,
+      .c-blog-article__text picture,
+      .bd--edit figure,
+      .box-article figure,
+      .p-blog-article figure,
+      .c-blog-article__text figure {
         max-width: 100% !important;
         height: auto !important;
         break-inside: avoid !important;
       }
 
       @media print {
-        .bd--edit {
+        .bd--edit,
+        .box-article,
+        .p-blog-article,
+        .c-blog-article__text {
           width: 100% !important;
           max-width: none !important;
         }
@@ -505,6 +541,24 @@ async function prepareArchiveView(page) {
           ".onetrust-pc-dark-filter",
           ".ot-sdk-container",
           ".otFlat",
+          "header",
+          ".drawer-nav",
+          ".head-logo",
+          ".com-hero",
+          ".com-hero-title",
+          ".blog-wdget-area",
+          ".blog-prof-r",
+          ".blog-foot-nav",
+          ".app-area",
+          ".box-app",
+          ".p-blog-profile",
+          ".p-blog-entry",
+          ".p-blog-face",
+          ".l-header",
+          ".c-header",
+          ".p-header",
+          "[class*='drawer']",
+          "[class*='hamburger']",
           "[class*='onetrust']",
           "[id*='onetrust']",
         ].join(","),
