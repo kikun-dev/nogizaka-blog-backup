@@ -405,8 +405,11 @@ async function imageStats(page) {
   });
 }
 
-async function prepareArchiveView(page) {
-  await page.evaluate(() => {
+async function prepareArchiveView(
+  page,
+  archiveMetadata,
+) {
+  await page.evaluate((metadata) => {
     const style = document.createElement("style");
 
     style.textContent = `
@@ -425,6 +428,7 @@ async function prepareArchiveView(page) {
       .bd--ctt,
       .bd--ctt__in,
       .bd--mn,
+      .codex-archive-header,
       .bd--edit,
       .box-article,
       .p-blog-article,
@@ -497,6 +501,7 @@ async function prepareArchiveView(page) {
 
       .bd--ctt__in,
       .bd--mn,
+      .codex-archive-header,
       .bd--edit,
       .box-article,
       .p-blog-article,
@@ -505,6 +510,25 @@ async function prepareArchiveView(page) {
         max-width: 760px !important;
         margin-left: auto !important;
         margin-right: auto !important;
+      }
+
+      .codex-archive-header {
+        padding: 32px 0 28px !important;
+      }
+
+      .codex-archive-header h1 {
+        margin: 0 !important;
+        font-size: 2.4rem !important;
+        line-height: 1.65 !important;
+        letter-spacing: 0.08em !important;
+        font-weight: 500 !important;
+      }
+
+      .codex-archive-header p {
+        margin: 18px 0 0 !important;
+        color: #6e6e73 !important;
+        font-size: 1.2rem !important;
+        letter-spacing: 0.08em !important;
       }
 
       .bd--edit img,
@@ -555,6 +579,67 @@ async function prepareArchiveView(page) {
 
     const text = (value) =>
       (value ?? "").replace(/\s+/g, " ").trim();
+
+    const hasVisibleArticleTitle = [
+      ".bd--hd__ttl",
+      ".c-blog-article__title",
+      ".blog-title",
+      "h1",
+    ].some((selector) => {
+      const element = document.querySelector(selector);
+
+      if (!text(element?.textContent)) {
+        return false;
+      }
+
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    });
+
+    if (
+      metadata.groupKey === "nogizaka" &&
+      metadata.title &&
+      !hasVisibleArticleTitle
+    ) {
+      const article =
+        document.querySelector(".bd--mn") ||
+        document.querySelector(".bd--edit") ||
+        document.querySelector(".bd--ctt__in");
+
+      if (
+        article &&
+        !document.querySelector(".codex-archive-header")
+      ) {
+        const header = document.createElement("section");
+        header.className = "codex-archive-header";
+
+        const title = document.createElement("h1");
+        title.textContent = metadata.title;
+        header.append(title);
+
+        const metaText = [
+          metadata.memberName,
+          metadata.date?.replaceAll("-", "."),
+        ]
+          .filter(Boolean)
+          .join("  ");
+
+        if (metaText) {
+          const meta = document.createElement("p");
+          meta.textContent = metaText;
+          header.append(meta);
+        }
+
+        article.parentNode?.insertBefore(header, article);
+      }
+    }
 
     document
       .querySelectorAll(
@@ -643,7 +728,7 @@ async function prepareArchiveView(page) {
           element.style.overflow = "visible";
         });
     });
-  });
+  }, archiveMetadata);
 
   await page.waitForTimeout(500);
 }
@@ -1086,7 +1171,12 @@ async function main() {
         `${baseName}.mhtml`,
       );
 
-      await prepareArchiveView(page);
+      await prepareArchiveView(page, {
+        groupKey: group.key,
+        title: metadata.title,
+        memberName: metadata.memberName,
+        date: metadata.date,
+      });
 
       // 通常表示の状態を先にMHTMLとして保存する。
       if (
