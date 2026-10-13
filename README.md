@@ -5,20 +5,20 @@
 ## 必要な環境
 
 - Node.js 24
-- pnpm 9
+- npm（Node.js 24 に付属する版）
 - Playwright Chromium
 
 ## セットアップ
 
 ```bash
-pnpm install
-pnpm exec playwright install chromium
+npm install
+npx playwright install chromium
 ```
 
 ## ローカル Web アプリ
 
 ```bash
-pnpm dev
+npm run dev
 ```
 
 PC のブラウザで `http://localhost:3000` を開きます。公式ブログの個別記事 URL を入力して「保存を開始」を押すと、1記事を `.local-data/archive/<jobId>/` に保存します。ジョブ状態は `.local-data/jobs/` に記録します。両フォルダは Git の管理対象外です。保存先を変えたい場合は `.env.example` を参考に `.env.local` へ `LOCAL_ARCHIVE_ROOT` を設定します。
@@ -30,7 +30,7 @@ PC のブラウザで `http://localhost:3000` を開きます。公式ブログ�
 Web 化の間も従来の CLI を使用できます。
 
 ```bash
-pnpm archive \
+npm run archive -- \
   --url 'https://www.nogizaka46.com/s/n46/diary/detail/記事ID' \
   --output '~/Documents/SakamichiBlogArchive' \
   --limit 1
@@ -41,10 +41,10 @@ pnpm archive \
 ## 開発用コマンド
 
 ```bash
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
 ローカル実行役と取得処理の境界は `server/job-runner.ts` です。現在は既存 CLI を子プロセスとして起動します。後続の Issue #2 で取得エンジンを分離し、公開時には Issue #9 で実行役を GitHub Actions worker に切り替えます。
