@@ -12,9 +12,9 @@ Closes #
 
 ## 検証結果
 
-- `pnpm test`:
-- `pnpm lint`:
-- `pnpm build`:
+- `npm test`:
+- `npm run lint`:
+- `npm run build`:
 - 手動確認:
 
 ## レビューしてほしい点・残る課題
