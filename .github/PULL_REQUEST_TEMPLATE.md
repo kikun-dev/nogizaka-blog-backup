@@ -13,8 +13,9 @@ Closes #
 ## 検証結果
 
 - `npm test`:
-- `npm run lint`:
-- `npm run build`:
+- `npm run check`（`npm test` に含まれる場合はその旨を記載）:
+- `npm run lint`（script が存在する場合のみ）:
+- `npm run build`（script が存在する場合のみ）:
 - 手動確認:
 
 ## レビューしてほしい点・残る課題
