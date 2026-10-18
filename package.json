@@ -1,11 +1,17 @@
 {
   "name": "sakamichi-blog-backup",
-  "version": "1.0.0",
-  "description": "Archive Nogizaka46, Sakurazaka46, and Hinatazaka46 official blog posts as PDF and MHTML files.",
+  "version": "1.1.0",
+  "description": "Save Sakamichi official blog posts and photos from a local web app or CLI.",
+  "private": true,
   "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "archive": "node archive-sakamichi-blog.mjs",
     "check": "node --check archive-sakamichi-blog.mjs",
-    "test": "npm run check"
+    "test": "npm run check && npm run typecheck && node --experimental-transform-types tests/job-safety.mjs"
   },
   "repository": {
     "type": "git",
@@ -21,8 +27,19 @@
   ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
+  "dependencies": {
+    "next": "^16.0.0",
+    "playwright": "^1.60.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
   "devDependencies": {
-    "playwright": "^1.60.0"
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.0.0",
+    "typescript": "^5.0.0"
   }
 }

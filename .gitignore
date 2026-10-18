@@ -1,10 +1,15 @@
 node_modules/
+.next/
+.local-data/
+*.tsbuildinfo
+next-env.d.ts
 .repo.git/
 .codex/
 
 *.log
 .DS_Store
 .env
+.env.local
 
 dist/
 coverage/
