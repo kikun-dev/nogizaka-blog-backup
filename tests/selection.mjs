@@ -27,8 +27,8 @@ for (const invalid of [
 }
 
 const validSelection = validateSelection({ ...base, range: "selected", articles: [selectedArticle] });
-const listedPage = { items: [{ url: article, id: "123", title: "選択した記事", date: "2026-10-19 12:00" }], page: 2, hasNext: false };
-assert.equal((await verifySelectedArticles(validSelection, async (page) => page === 2 ? listedPage : null))[0].title, "選択した記事");
+const listedPage = { items: [{ url: article, id: "123", title: "選択したブログ", date: "2026-10-19 12:00" }], page: 2, hasNext: false };
+assert.equal((await verifySelectedArticles(validSelection, async (page) => page === 2 ? listedPage : null))[0].title, "選択したブログ");
 await assert.rejects(
   verifySelectedArticles(validSelection, async () => ({ ...listedPage, items: [{ url: article.replace("123", "456"), id: "456" }] })),
   SelectionError,

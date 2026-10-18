@@ -26,7 +26,7 @@ test("author identity and duplicate protection also work for special authors", (
   assert.throws(() => assertSameAuthor("5期生", "6期生"), /別の投稿主体/);
   const visited = new Set();
   markArticleVisited(visited, "123");
-  assert.throws(() => markArticleVisited(visited, "123"), /同じ記事/);
+  assert.throws(() => markArticleVisited(visited, "123"), /同じブログ/);
 });
 
 test("author store migrates a legacy index and upserts records", async () => {

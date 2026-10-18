@@ -84,7 +84,7 @@ export function LocalJobForm() {
         <div><h2 id="workspace-title">取得条件を決める</h2></div>
         <span className="phase-badge">ローカル版</span>
       </div>
-      <p className="workspace-description">メンバーを選んで、保存する内容と記事の範囲を決めます。</p>
+      <p className="workspace-description">メンバーを選んで、保存する内容とブログの範囲を決めます。</p>
       <div className="token-field">
         <label htmlFor="access-token">ローカルアクセストークン</label>
         <input id="access-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => { setAccessToken(event.target.value); setReadyToken(""); }} aria-describedby="token-help" />
@@ -95,9 +95,9 @@ export function LocalJobForm() {
         : <p className="selection-start-help">トークンを入力すると取得条件を選べます。</p>}
 
       <form onSubmit={submit} className="job-form direct-url-form">
-        <h3>個別記事URLで1件保存</h3>
-        <p className="field-help">公式一覧にない記事はURLを直接入力できます。PDFとMHTMLを保存します。</p>
-        <label htmlFor="article-url">個別記事のURL</label>
+        <h3>ブログの個別URLで1件保存</h3>
+        <p className="field-help">公式一覧にないブログはURLを直接入力できます。PDFとMHTMLを保存します。</p>
+        <label htmlFor="article-url">ブログの個別URL</label>
         <div className="input-row">
           <input id="article-url" type="url" inputMode="url" autoComplete="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://www.nogizaka46.com/s/n46/diary/detail/..." />
           <button type="submit" disabled={busy}>{submitting ? "開始中…" : "保存を開始"}</button>

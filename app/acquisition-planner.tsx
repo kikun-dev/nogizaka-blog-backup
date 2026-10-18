@@ -11,7 +11,7 @@ const contentName = { photos: "写真のみ", blog: "ブログ" } as const;
 const rangeName = {
   "latest-one": "最新1件",
   "latest-n": "最新N件",
-  selected: "選んだ記事",
+  selected: "選んだブログ",
   all: "全件バックアップ",
 } as const;
 
@@ -93,7 +93,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
             signal: controller.signal,
           });
           const data = await response.json() as { articles?: BlogArticlePage; error?: string };
-          if (!response.ok || !data.articles) throw new Error(data.error ?? "記事一覧を取得できませんでした。");
+          if (!response.ok || !data.articles) throw new Error(data.error ?? "ブログ一覧を取得できませんでした。");
           return data.articles;
         }
         const first = await fetchSourcePage(sourceCursor.sourcePage);
@@ -110,7 +110,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
           });
         }
       } catch (error) {
-        if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "記事一覧を取得できませんでした。");
+        if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "ブログ一覧を取得できませんでした。");
       } finally {
         if (!controller.signal.aborted) setLoadingArticles(false);
       }
@@ -168,7 +168,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
   function toggleArticle(item: ListedArticle) {
     invalidateConfirmation();
     if (!selected[item.article.id] && selectedCount >= limit) {
-      setMessage(`${contentName[content]}は最大${limit}記事までです。ほかの記事を選ぶには、先に選択を解除してください。`);
+      setMessage(`${contentName[content]}は最大${limit}件までです。ほかのブログを選ぶには、先に選択を解除してください。`);
       return;
     }
     setMessage("");
@@ -197,7 +197,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
     }
     const toAdd = articlePage.items.filter(({ article }) => !selected[article.id]);
     if (selectedCount + toAdd.length > limit) {
-      setMessage(`残り${limit - selectedCount}記事まで選べます。このページを一括選択するには、先に選択を減らしてください。`);
+      setMessage(`残り${limit - selectedCount}件まで選べます。このページを一括選択するには、先に選択を減らしてください。`);
       return;
     }
     setSelected((current) => Object.fromEntries([
@@ -259,9 +259,9 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
       {stage === "articles" ? (
         <div className="article-screen">
           <button type="button" className="text-button" onClick={() => { invalidateConfirmation(); setStage("conditions"); setMessage(""); }}>条件の設定に戻る</button>
-          <h4>{authors.find((author) => author.id === authorId)?.name}の記事を選ぶ</h4>
+          <h4>{authors.find((author) => author.id === authorId)?.name}のブログを選ぶ</h4>
           <p className="field-help">新しい順に表示します。ページを移動しても選択は残ります。</p>
-          {loadingArticles && <p role="status" className="field-help">記事を読み込んでいます…</p>}
+          {loadingArticles && <p role="status" className="field-help">ブログを読み込んでいます…</p>}
           {articlePage && (
             <>
               <div className="article-page-heading">
@@ -270,7 +270,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
                   {selectedOnPage ? "このページの選択を解除" : "このページをすべて選択"}
                 </button>
               </div>
-              {articlePage.items.length === 0 ? <p className="field-help">このページに記事はありません。</p> : (
+              {articlePage.items.length === 0 ? <p className="field-help">このページにブログはありません。</p> : (
                 <ul className="selection-article-list">
                   {articlePage.items.map((item) => <li key={item.article.id}>
                     <label className="selection-article-row">
@@ -286,10 +286,10 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
               </div>
             </>
           )}
-          {message && <div role="alert"><p className="form-message">{message}</p>{!articlePage && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>記事一覧を再読み込み</button>}</div>}
-          {selectedCount >= limit && <p className="selection-limit-note" role="status">{contentName[content]}の上限は{limit}記事です。別の記事を選ぶには、選択を解除してください。</p>}
+          {message && <div role="alert"><p className="form-message">{message}</p>{!articlePage && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>ブログ一覧を再読み込み</button>}</div>}
+          {selectedCount >= limit && <p className="selection-limit-note" role="status">{contentName[content]}の上限は{limit}件です。別のブログを選ぶには、選択を解除してください。</p>}
           <div className="selection-sticky-bar" aria-live="polite">
-            <span><strong>{selectedCount}</strong> / {limit}記事を選択中</span>
+            <span><strong>{selectedCount}</strong>件選択中（上限{limit}件）</span>
             <button type="button" className="primary-button" disabled={selectedCount === 0 || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "選択を確定"}</button>
           </div>
         </div>
@@ -297,7 +297,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
         <div className="bulk-screen">
           <button type="button" className="text-button" onClick={() => { setStage("conditions"); changeRange("latest-one"); }}>通常の取得に戻る</button>
           <h4>全件バックアップ</h4>
-          <p>対象の記事をすべて扱う重い処理です。通常の取得とは分けて条件を確認します。</p>
+          <p>対象のブログをすべて扱う重い処理です。通常の取得とは分けて条件を確認します。</p>
           <p className="field-help">全件処理と続きからの再開は、ブログ保存機能の実装時に利用できます。</p>
           {message && <p className="form-message" role="alert">{message}</p>}
           <button type="button" className="secondary-button" disabled={!authorId || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "全件バックアップの条件を確認"}</button>
@@ -323,18 +323,18 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
           </div>
           <fieldset className="selection-fieldset">
             <legend>何を保存する？</legend>
-            <label className="choice-row"><input type="radio" name="selection-content" checked={content === "photos"} onChange={() => changeContent("photos")} /><span><strong>写真のみ</strong><small>記事内の写真を確認する</small></span></label>
+            <label className="choice-row"><input type="radio" name="selection-content" checked={content === "photos"} onChange={() => changeContent("photos")} /><span><strong>写真のみ</strong><small>ブログ内の写真を確認する</small></span></label>
             <label className="choice-row"><input type="radio" name="selection-content" checked={content === "blog"} onChange={() => changeContent("blog")} /><span><strong>ブログ</strong><small>PDFとMHTMLで保存する</small></span></label>
           </fieldset>
           <fieldset className="selection-fieldset range-fieldset">
             <legend>どこまで取得する？</legend>
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "latest-one"} onChange={() => changeRange("latest-one")} /><span><strong>最新1件</strong><small>いつもの確認に</small></span></label>
-            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "latest-n"} onChange={() => changeRange("latest-n")} /><span><strong>最新N件</strong><small>最大{limit}記事まで</small></span></label>
-            {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">記事数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
-            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>記事を選ぶ</strong><small>ページを跨いで{limit}記事まで</small></span></label>
-            {range === "selected" && <div className="select-entry"><span>{selectedCount} / {limit}記事を選択中</span><button type="button" className="secondary-button" disabled={!authorId} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>記事選択へ進む</button></div>}
+            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "latest-n"} onChange={() => changeRange("latest-n")} /><span><strong>最新N件</strong><small>最大{limit}件まで</small></span></label>
+            {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">ブログの件数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
+            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>ブログを選ぶ</strong><small>ページを跨いで{limit}件まで</small></span></label>
+            {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorId} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
           </fieldset>
-          <div className="bulk-entry"><strong>全件バックアップ</strong><p>大量の記事を扱うため、別の手順で設定します。</p><button type="button" className="text-button" disabled={!authorId} onClick={() => { changeRange("all"); setStage("bulk"); }}>全件バックアップの条件を設定</button></div>
+          <div className="bulk-entry"><strong>全件バックアップ</strong><p>大量のブログを扱うため、別の手順で設定します。</p><button type="button" className="text-button" disabled={!authorId} onClick={() => { changeRange("all"); setStage("bulk"); }}>全件バックアップの条件を設定</button></div>
           {message && <div role="alert" className="catalog-error"><p className="form-message">{message}</p>{authors.length === 0 && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>一覧を再読み込み</button>}</div>}
           {range !== "selected" && range !== "all" && <button type="button" className="primary-button selection-confirm" disabled={!authorId || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "この条件を確認"}</button>}
           {plan && (
@@ -342,10 +342,10 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
               <strong>取得条件を確認しました</strong>
               <p>{plan.author.name}・{contentName[plan.content]}・{rangeName[plan.range]}{plan.range === "latest-n" ? `（${plan.count}件）` : plan.range === "selected" ? `（${plan.articles?.length}件）` : ""}</p>
               {plan.range === "latest-n" && plan.previewArticles && plan.previewArticles.length < (plan.count ?? 0) &&
-                <p className="field-help">公式一覧で確認できた記事は{plan.previewArticles.length}件です。</p>}
+                <p className="field-help">公式一覧で確認できたブログは{plan.previewArticles.length}件です。</p>}
               {plan.previewArticles && plan.previewArticles.length > 0 && (
                 <div className="selection-summary-preview">
-                  <h4>対象の記事</h4>
+                  <h4>対象のブログ</h4>
                   <ul>{plan.previewArticles.map((article) => <li key={article.id}>
                     <strong>{article.title}</strong>
                     <time>更新日時: {article.date || "日時不明"}</time>
@@ -353,7 +353,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
                 </div>
               )}
               {singleBlogUrl ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(singleBlogUrl)}>{busy ? "保存中…" : "この1件を保存"}</button>
-                : <p className="field-help">{plan.content === "photos" ? "写真の表示と保存は次の機能で利用できます。" : "複数記事と全件バックアップの実行は次の機能で利用できます。"}</p>}
+                : <p className="field-help">{plan.content === "photos" ? "写真の表示と保存は次の機能で利用できます。" : "複数件のブログと全件バックアップの実行は次の機能で利用できます。"}</p>}
             </div>
           )}
         </>

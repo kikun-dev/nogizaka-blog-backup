@@ -27,7 +27,7 @@ export async function POST(request: Request) {
         ? await collectLatestArticles(selection.range === "latest-one" ? 1 : selection.count!, loadPage)
         : [];
     if ((selection.range === "latest-one" || selection.range === "latest-n") && previewArticles.length === 0) {
-      return Response.json({ error: "記事が見つかりませんでした。" }, { status: 404 });
+      return Response.json({ error: "ブログが見つかりませんでした。" }, { status: 404 });
     }
     return Response.json({
       plan: { ...selection, author, maxArticles: SELECTION_LIMITS[selection.content], firstArticle: previewArticles[0], previewArticles },

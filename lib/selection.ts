@@ -56,33 +56,33 @@ export function validateSelection(input: unknown): SelectionRequest {
 
   if (value.range === "latest-n") {
     if (!Number.isInteger(value.count) || (value.count as number) < 2 || (value.count as number) > limit) {
-      throw new SelectionError(`最新の記事数は2〜${limit}件で指定してください。`);
+      throw new SelectionError(`最新ブログの件数は2〜${limit}件で指定してください。`);
     }
     selection.count = value.count as number;
   } else if (value.count !== undefined) {
-    throw new SelectionError("記事数の指定が取得範囲と一致しません。");
+    throw new SelectionError("ブログの件数指定が取得範囲と一致しません。");
   }
 
   if (value.range === "selected") {
     if (!Array.isArray(value.articles) || value.articles.length === 0 || value.articles.length > limit) {
-      throw new SelectionError(`選べる記事は最大${limit}件です。`);
+      throw new SelectionError(`選べるブログは最大${limit}件です。`);
     }
     const articles = value.articles.map((entry) => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SelectionError("記事を確認してください。");
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SelectionError("ブログを確認してください。");
       const { url, sourcePage } = entry as Record<string, unknown>;
-      if (typeof url !== "string" || url.length > 2048) throw new SelectionError("記事URLを確認してください。");
+      if (typeof url !== "string" || url.length > 2048) throw new SelectionError("ブログのURLを確認してください。");
       if (!Number.isSafeInteger(sourcePage) || (sourcePage as number) < 1 || (sourcePage as number) > 10000) {
-        throw new SelectionError("記事一覧のページ番号を確認してください。");
+        throw new SelectionError("ブログ一覧のページ番号を確認してください。");
       }
       try { return { url: normalizeArticleUrl(url, undefined, selection.group), sourcePage: sourcePage as number }; }
-      catch { throw new SelectionError("選択した記事に別グループのURLが含まれています。"); }
+      catch { throw new SelectionError("選択したブログに別グループのURLが含まれています。"); }
     });
     if (new Set(articles.map(({ url }) => new URL(url).pathname)).size !== articles.length) {
-      throw new SelectionError("同じ記事を重複して選択できません。");
+      throw new SelectionError("同じブログを重複して選択できません。");
     }
     selection.articles = articles;
   } else if (value.articles !== undefined) {
-    throw new SelectionError("記事の指定が取得範囲と一致しません。");
+    throw new SelectionError("ブログの指定が取得範囲と一致しません。");
   }
 
   return selection;
@@ -105,7 +105,7 @@ export async function verifySelectedArticles(
   return selection.articles.map(({ url, sourcePage }) => {
     const article = officialArticles.get(sourcePage)?.get(url);
     if (!article) {
-      throw new SelectionError("選択した記事が、このメンバーの公式一覧にありません。記事を選び直してください。");
+      throw new SelectionError("選択したブログが、このメンバーの公式一覧にありません。ブログを選び直してください。");
     }
     return article;
   });
