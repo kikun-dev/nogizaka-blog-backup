@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { authorListUrl, articlesUrl, isAuthorId, readArticles, readAuthors } from "../server/catalog/adapters.ts";
+import { isExpectedListingUrl } from "../server/catalog/listing-url.ts";
 
 assert.equal(isAuthorId("000"), true);
 assert.equal(isAuthorId("../detail/1"), false);
 assert.equal(articlesUrl("hinatazaka", "000", 2), "https://www.hinatazaka46.com/s/official/diary/member/list?ct=000&page=1");
+const firstPageUrl = authorListUrl("sakurazaka", "70");
+const secondPageUrl = articlesUrl("sakurazaka", "70", 2);
+assert.equal(isExpectedListingUrl(firstPageUrl, `${firstPageUrl}&ima=0000`), true);
+assert.equal(isExpectedListingUrl(firstPageUrl, `${firstPageUrl}&page=1`), false);
+assert.equal(isExpectedListingUrl(secondPageUrl, `${secondPageUrl}&ima=0000`), true);
+assert.equal(isExpectedListingUrl(secondPageUrl, firstPageUrl), false);
+assert.equal(isExpectedListingUrl(secondPageUrl, `${firstPageUrl}&page=2`), false);
+assert.equal(isExpectedListingUrl(secondPageUrl, secondPageUrl.replace("ct=70", "ct=06")), false);
 
 const browser = await chromium.launch();
 try {

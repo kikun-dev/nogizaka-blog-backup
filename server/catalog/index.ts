@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright";
 import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
 import { articlesUrl, authorsUrl, readArticles, readAuthors } from "./adapters";
+import { isExpectedListingUrl } from "./listing-url";
 
 const CACHE_MS = 5 * 60 * 1000;
 const MAX_ACTIVE = 2;
@@ -36,10 +37,7 @@ async function withListingPage<T>(url: string, read: (page: Page) => Promise<T>)
       });
       const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
       if (!response?.ok()) throw new Error(`公式サイトの一覧を取得できませんでした（HTTP ${response?.status() ?? "不明"}）。`);
-      const requested = new URL(url);
-      const actual = new URL(page.url());
-      if (actual.origin !== requested.origin || actual.pathname !== requested.pathname ||
-          (requested.searchParams.has("ct") && actual.searchParams.get("ct") !== requested.searchParams.get("ct"))) {
+      if (!isExpectedListingUrl(url, page.url())) {
         throw new Error("公式サイトの一覧URLが別のページへ移動したため、取得できませんでした。");
       }
       return await read(page);
