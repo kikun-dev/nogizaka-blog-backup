@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
 import type { LocalJob } from "@/server/job-store";
 
 const statusLabel = {
@@ -13,11 +14,102 @@ const statusLabel = {
 export function LocalJobForm() {
   const [url, setUrl] = useState("");
   const [accessToken, setAccessToken] = useState("");
+  const [group, setGroup] = useState<BlogGroup>("nogizaka");
+  const [authors, setAuthors] = useState<BlogAuthor[]>([]);
+  const [authorId, setAuthorId] = useState("");
+  const [articlePage, setArticlePage] = useState<BlogArticlePage | null>(null);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [authorsLoading, setAuthorsLoading] = useState(false);
+  const [articlesLoading, setArticlesLoading] = useState(false);
+  const [catalogMessage, setCatalogMessage] = useState("");
+  const authorRequest = useRef(0);
   const [job, setJob] = useState<LocalJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const activeJobId = job?.id;
   const activeStatus = job?.status;
+
+  async function loadAuthors() {
+    if (!accessToken) {
+      setCatalogMessage("ローカルアクセストークンを入力してください。");
+      return;
+    }
+    const requestId = ++authorRequest.current;
+    setAuthorsLoading(true);
+    setCatalogMessage("");
+    setAuthors([]);
+    setAuthorId("");
+    setArticlePage(null);
+    setUrl("");
+    try {
+      const response = await fetch(`/api/catalog/${group}/authors`, {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json() as { authors?: BlogAuthor[]; error?: string };
+      if (!response.ok || !data.authors) throw new Error(data.error ?? "一覧を取得できませんでした。");
+      if (requestId !== authorRequest.current) return;
+      setAuthors(data.authors);
+      if (data.authors.length === 0) setCatalogMessage("公式サイトにブログ主体が見つかりませんでした。");
+    } catch (error) {
+      if (requestId === authorRequest.current) setCatalogMessage(error instanceof Error ? error.message : "一覧を取得できませんでした。");
+    } finally {
+      if (requestId === authorRequest.current) setAuthorsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!authorId) return;
+    const controller = new AbortController();
+    async function loadArticles() {
+      setArticlesLoading(true);
+      setCatalogMessage("");
+      setArticlePage(null);
+      try {
+        const response = await fetch(`/api/catalog/${group}/authors/${authorId}/articles?page=${pageNumber}`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+        const data = await response.json() as { articles?: BlogArticlePage; error?: string };
+        if (!response.ok || !data.articles) throw new Error(data.error ?? "記事一覧を取得できませんでした。");
+        setArticlePage(data.articles);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setCatalogMessage(error instanceof Error ? error.message : "記事一覧を取得できませんでした。");
+      } finally {
+        if (!controller.signal.aborted) setArticlesLoading(false);
+      }
+    }
+    void loadArticles();
+    return () => controller.abort();
+  }, [group, authorId, pageNumber, accessToken]);
+
+  function selectGroup(value: BlogGroup) {
+    authorRequest.current += 1;
+    setGroup(value);
+    setAuthorsLoading(false);
+    setArticlesLoading(false);
+    setAuthors([]);
+    setAuthorId("");
+    setArticlePage(null);
+    setPageNumber(1);
+    setUrl("");
+    setCatalogMessage("");
+  }
+
+  function selectAuthor(value: string) {
+    setAuthorId(value);
+    setArticlePage(null);
+    setPageNumber(1);
+    setUrl("");
+  }
+
+  function selectPage(value: number) {
+    setArticlePage(null);
+    setPageNumber(value);
+    setUrl("");
+  }
 
   useEffect(() => {
     if (!activeJobId || (activeStatus !== "queued" && activeStatus !== "running")) return;
@@ -72,7 +164,7 @@ export function LocalJobForm() {
         <span className="phase-badge">準備段階</span>
       </div>
       <p className="workspace-description">
-        公式ブログの記事URLを入力してください。PDFとMHTMLをこのパソコンの開発用フォルダへ保存します。
+        公式ブログから記事を選び、PDFとMHTMLをこのパソコンの開発用フォルダへ保存します。
       </p>
       <form onSubmit={submit} className="job-form">
         <label htmlFor="access-token">ローカルアクセストークン</label>
@@ -86,6 +178,59 @@ export function LocalJobForm() {
           aria-describedby="token-help"
         />
         <p id="token-help" className="field-help">開発 PC の .env.local に設定したトークンを入力してください。</p>
+        <div className="catalog-picker">
+          <h3>公式サイトから選ぶ</h3>
+          <div className="catalog-source-row">
+            <div>
+              <label htmlFor="blog-group">グループ</label>
+              <select id="blog-group" value={group} onChange={(event) => selectGroup(event.target.value as BlogGroup)}>
+                <option value="nogizaka">乃木坂46</option>
+                <option value="sakurazaka">櫻坂46</option>
+                <option value="hinatazaka">日向坂46</option>
+              </select>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => void loadAuthors()} disabled={authorsLoading}>
+              {authorsLoading ? "読み込み中…" : "ブログ主体を表示"}
+            </button>
+          </div>
+          {authors.length > 0 && (
+            <div className="catalog-author-field">
+              <label htmlFor="blog-author">ブログ主体</label>
+              <select id="blog-author" value={authorId} onChange={(event) => selectAuthor(event.target.value)}>
+                <option value="">選択してください</option>
+                {authors.map((author) => <option key={author.id} value={author.id}>{author.name}{author.type !== "member" ? `（${{
+                  generation: "期別", staff: "運営", mascot: "マスコット", other: "その他",
+                }[author.type]}）` : ""}</option>)}
+              </select>
+            </div>
+          )}
+          {catalogMessage && <p className="form-message" role="alert">{catalogMessage}</p>}
+          {articlesLoading && authorId && <p className="field-help" role="status">記事一覧を読み込んでいます…</p>}
+          {articlePage && (
+            <div className="catalog-articles">
+              <div className="catalog-articles-heading">
+                <h4>{authors.find((author) => author.id === authorId)?.name}の記事</h4>
+                <span>{articlePage.page}ページ目</span>
+              </div>
+              {articlePage.items.length === 0 ? (
+                <p className="field-help">このページに記事がありません。公式サイトでも一覧を確認できない場合があります。</p>
+              ) : (
+                <ul className="catalog-article-list">
+                  {articlePage.items.map((article) => <li key={article.id}>
+                    <div><strong>{article.title}</strong>{article.excerpt && <span className="catalog-excerpt">{article.excerpt}</span>}<time>{article.date || "日付なし"}</time></div>
+                    <button type="button" className="article-select" onClick={() => setUrl(article.url)} aria-label={`${article.title}を保存対象に選ぶ`}>
+                      {url === article.url ? "選択中" : "選ぶ"}
+                    </button>
+                  </li>)}
+                </ul>
+              )}
+              <div className="catalog-pagination">
+                <button type="button" className="secondary-button" disabled={pageNumber === 1 || articlesLoading} onClick={() => selectPage(pageNumber - 1)}>前のページ</button>
+                <button type="button" className="secondary-button" disabled={!articlePage.hasNext || articlesLoading} onClick={() => selectPage(pageNumber + 1)}>次のページ</button>
+              </div>
+            </div>
+          )}
+        </div>
         <label htmlFor="article-url">個別記事のURL</label>
         <div className="input-row">
           <input
@@ -101,7 +246,7 @@ export function LocalJobForm() {
           />
           <button type="submit" disabled={busy}>{submitting ? "開始中…" : "保存を開始"}</button>
         </div>
-        <p id="url-help" className="field-help">乃木坂46・櫻坂46・日向坂46の個別記事URLに対応しています。</p>
+        <p id="url-help" className="field-help">記事を選ぶとURLが入ります。公式一覧にない記事はURLを直接入力できます。</p>
       </form>
 
       {message && <p className="form-message" role="alert">{message}</p>}
