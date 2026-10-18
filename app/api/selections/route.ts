@@ -1,6 +1,6 @@
 import { getArticlePage, getAuthors } from "@/server/catalog";
 import { checkLocalAccess } from "@/server/local-access";
-import { SELECTION_LIMITS, SelectionError, validateSelection } from "@/lib/selection";
+import { SELECTION_LIMITS, SelectionError, validateSelection, verifySelectedArticles } from "@/lib/selection";
 
 export const runtime = "nodejs";
 
@@ -20,6 +20,7 @@ export async function POST(request: Request) {
   try {
     const author = (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);
     if (!author) return Response.json({ error: "公式一覧にないメンバーです。" }, { status: 404 });
+    await verifySelectedArticles(selection, (page) => getArticlePage(selection.group, author.id, page));
     const firstArticle = selection.range === "latest-one"
       ? (await getArticlePage(selection.group, author.id, 1))?.items[0]
       : undefined;
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
       plan: { ...selection, author, maxArticles: SELECTION_LIMITS[selection.content], firstArticle },
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof SelectionError) return Response.json({ error: error.message }, { status: 400 });
     console.error("Failed to verify article selection", error);
     return Response.json({ error: "公式サイトの一覧を確認できませんでした。少し待って再試行してください。" }, { status: 502 });
   }

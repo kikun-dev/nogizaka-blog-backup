@@ -1,8 +1,9 @@
 import { normalizeArticleUrl } from "./archive/urls.mjs";
-import type { BlogArticle, BlogAuthor, BlogGroup } from "./catalog/types";
+import type { BlogArticle, BlogArticlePage, BlogAuthor, BlogGroup } from "./catalog/types";
 
 export type SelectionContent = "photos" | "blog";
 export type SelectionRange = "latest-one" | "latest-n" | "selected" | "all";
+export type SelectedArticle = { url: string; sourcePage: number };
 
 export type SelectionRequest = {
   group: BlogGroup;
@@ -10,7 +11,7 @@ export type SelectionRequest = {
   content: SelectionContent;
   range: SelectionRange;
   count?: number;
-  urls?: string[];
+  articles?: SelectedArticle[];
 };
 
 export type SelectionPlan = SelectionRequest & {
@@ -62,19 +63,47 @@ export function validateSelection(input: unknown): SelectionRequest {
   }
 
   if (value.range === "selected") {
-    if (!Array.isArray(value.urls) || value.urls.length === 0 || value.urls.length > limit) {
+    if (!Array.isArray(value.articles) || value.articles.length === 0 || value.articles.length > limit) {
       throw new SelectionError(`選べる記事は最大${limit}件です。`);
     }
-    const urls = value.urls.map((url) => {
+    const articles = value.articles.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new SelectionError("記事を確認してください。");
+      const { url, sourcePage } = entry as Record<string, unknown>;
       if (typeof url !== "string" || url.length > 2048) throw new SelectionError("記事URLを確認してください。");
-      try { return normalizeArticleUrl(url, undefined, selection.group); }
+      if (!Number.isSafeInteger(sourcePage) || (sourcePage as number) < 1 || (sourcePage as number) > 10000) {
+        throw new SelectionError("記事一覧のページ番号を確認してください。");
+      }
+      try { return { url: normalizeArticleUrl(url, undefined, selection.group), sourcePage: sourcePage as number }; }
       catch { throw new SelectionError("選択した記事に別グループのURLが含まれています。"); }
     });
-    if (new Set(urls).size !== urls.length) throw new SelectionError("同じ記事を重複して選択できません。");
-    selection.urls = urls;
-  } else if (value.urls !== undefined) {
-    throw new SelectionError("記事URLの指定が取得範囲と一致しません。");
+    if (new Set(articles.map(({ url }) => new URL(url).pathname)).size !== articles.length) {
+      throw new SelectionError("同じ記事を重複して選択できません。");
+    }
+    selection.articles = articles;
+  } else if (value.articles !== undefined) {
+    throw new SelectionError("記事の指定が取得範囲と一致しません。");
   }
 
   return selection;
+}
+
+export async function verifySelectedArticles(
+  selection: SelectionRequest,
+  loadPage: (page: number) => Promise<BlogArticlePage | null>,
+): Promise<SelectedArticle[]> {
+  if (selection.range !== "selected" || !selection.articles) return [];
+  const pages = [...new Set(selection.articles.map(({ sourcePage }) => sourcePage))];
+  const officialUrls = new Map<number, Set<string>>();
+  for (let index = 0; index < pages.length; index += 2) {
+    await Promise.all(pages.slice(index, index + 2).map(async (page) => {
+      const listing = await loadPage(page);
+      officialUrls.set(page, new Set(listing?.items.map(({ url }) => normalizeArticleUrl(url, undefined, selection.group)) ?? []));
+    }));
+  }
+  for (const article of selection.articles) {
+    if (!officialUrls.get(article.sourcePage)?.has(article.url)) {
+      throw new SelectionError("選択した記事が、このメンバーの公式一覧にありません。記事を選び直してください。");
+    }
+  }
+  return selection.articles;
 }
