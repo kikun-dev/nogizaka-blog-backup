@@ -40,7 +40,13 @@ npm run archive -- \
   --limit 1
 ```
 
-開始 URL からグループを自動判定します。メンバー別一覧ではなく、個別記事の URL を指定してください。主なオプションは `--limit 3`、`--delay 5000`、`--headed`、`--force` です。
+開始 URL からグループを自動判定します。投稿主体別の一覧ではなく、個別記事の URL を指定してください。主なオプションは `--limit 3`、`--delay 5000`、`--headed`、`--force` です。期別ブログやポカなども投稿主体別のフォルダに保存します。既存の `index.json` にある `memberName` は読み込み時に `authorName` として扱い、次の保存時に新形式へ移します。
+
+## 共通取得エンジン
+
+CLI は `lib/archive/index.mjs` の `archiveArticles()` を呼びます。同じモジュールの `inspectArticle()` は記事のタイトル・投稿主体・投稿日などを保存前に取得でき、Web サーバーからは `server/archive-engine.ts` 経由で両関数を呼べます。記事情報の確認では画像の読込状態をその時点の値として返し、PDF/MHTML 保存では従来どおり画像の読み込みを再試行します。
+
+`lib/archive/` は、グループと URL、記事取得・メタデータ・画像、PDF/MHTML 生成、投稿主体別の索引・ファイル保存をモジュールごとに分けています。
 
 ## 開発用コマンド
 
@@ -51,4 +57,4 @@ npm test
 npm run build
 ```
 
-ローカル実行役と取得処理の境界は `server/job-runner.ts` です。現在は既存 CLI を子プロセスとして起動します。後続の Issue #2 で取得エンジンを分離し、公開時には Issue #9 で実行役を GitHub Actions worker に切り替えます。
+ローカル実行役と取得処理の境界は `server/job-runner.ts` です。現在は共通エンジンを呼ぶ CLI を子プロセスとして起動します。公開時には Issue #9 で実行役を GitHub Actions worker に切り替えます。
