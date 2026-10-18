@@ -79,9 +79,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .workspace-description { margin: 18px 0 24px; color: var(--muted); }
 .job-form label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 700; }
 .input-row { display: flex; gap: 10px; }
-.input-row input {
-  flex: 1;
-  min-width: 0;
+.job-form input {
+  width: 100%;
   height: 48px;
   padding: 0 14px;
   border: 1px solid oklch(0.76 0.008 343);
@@ -89,6 +88,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   background: var(--bg);
   color: var(--ink);
 }
+.input-row input { flex: 1; min-width: 0; }
 .input-row input::placeholder { color: oklch(0.44 0.008 343); }
 .input-row button {
   flex: none;
@@ -104,6 +104,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 }
 .input-row button:hover:not(:disabled) { background: var(--primary-hover); }
 .field-help { margin: 9px 0 0; color: var(--muted); font-size: 12px; }
+#token-help { margin-bottom: 18px; }
 .form-message { color: oklch(0.43 0.14 25); font-size: 14px; }
 .job-result { margin-top: 25px; padding: 18px; border-radius: 9px; background: var(--surface); }
 .job-result-top { display: flex; align-items: center; justify-content: space-between; }

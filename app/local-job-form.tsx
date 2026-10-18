@@ -12,6 +12,7 @@ const statusLabel = {
 
 export function LocalJobForm() {
   const [url, setUrl] = useState("");
+  const [accessToken, setAccessToken] = useState("");
   const [job, setJob] = useState<LocalJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -22,7 +23,10 @@ export function LocalJobForm() {
     if (!activeJobId || (activeStatus !== "queued" && activeStatus !== "running")) return;
     const timer = window.setInterval(async () => {
       try {
-        const response = await fetch(`/api/jobs/${activeJobId}`, { cache: "no-store" });
+        const response = await fetch(`/api/jobs/${activeJobId}`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
         if (!response.ok) throw new Error("状態を確認できませんでした。画面を再読み込みしてください。");
         const data = await response.json() as { job: LocalJob };
         setJob(data.job);
@@ -32,7 +36,7 @@ export function LocalJobForm() {
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [activeJobId, activeStatus]);
+  }, [activeJobId, activeStatus, accessToken]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +47,7 @@ export function LocalJobForm() {
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ url }),
       });
       const data = await response.json() as { job?: LocalJob; error?: string };
@@ -71,6 +75,17 @@ export function LocalJobForm() {
         公式ブログの記事URLを入力してください。PDFとMHTMLをこのパソコンの開発用フォルダへ保存します。
       </p>
       <form onSubmit={submit} className="job-form">
+        <label htmlFor="access-token">ローカルアクセストークン</label>
+        <input
+          id="access-token"
+          type="password"
+          autoComplete="off"
+          required
+          value={accessToken}
+          onChange={(event) => setAccessToken(event.target.value)}
+          aria-describedby="token-help"
+        />
+        <p id="token-help" className="field-help">開発 PC の .env.local に設定したトークンを入力してください。</p>
         <label htmlFor="article-url">個別記事のURL</label>
         <div className="input-row">
           <input

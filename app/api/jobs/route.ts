@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { parseArticleUrl } from "@/server/article-url";
-import { localJobStore } from "@/server/job-store";
 import { localJobRunner } from "@/server/job-runner";
+import { checkLocalAccess } from "@/server/local-access";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const denied = checkLocalAccess(request);
+  if (denied) return denied;
+
   let articleUrl: string;
   try {
     const body: unknown = await request.json();
@@ -14,7 +17,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "入力を確認してください。" }, { status: 400 });
   }
 
-  const job = await localJobStore.create(articleUrl);
-  localJobRunner.start(job);
+  const job = await localJobRunner.submit(articleUrl);
+  if (!job) return NextResponse.json({ error: "待機中のジョブが上限に達しています。後で再試行してください。" }, { status: 429 });
   return NextResponse.json({ job }, { status: 202 });
 }

@@ -3,18 +3,57 @@ import path from "node:path";
 import { localJobStore, type JobStore, type LocalJob } from "./job-store";
 
 export interface JobRunner {
-  start(job: LocalJob): void;
+  initialize(): Promise<void>;
+  submit(articleUrl: string): Promise<LocalJob | null>;
 }
 
-const activeJobs = new Set<string>();
+const MAX_RUNNING = 1;
+const MAX_WAITING = 10;
 
 export class LocalJobRunner implements JobRunner {
-  constructor(private readonly store: JobStore) {}
+  private initialization: Promise<void> | null = null;
+  private running = 0;
+  private reserved = 0;
+  private waiting: LocalJob[] = [];
 
-  start(job: LocalJob) {
-    if (activeJobs.has(job.id)) return;
-    activeJobs.add(job.id);
-    void this.run(job).finally(() => activeJobs.delete(job.id));
+  constructor(
+    private readonly store: JobStore,
+    private readonly execute: (job: LocalJob) => Promise<void> = (job) => this.run(job),
+  ) {}
+
+  async initialize() {
+    if (!this.initialization) {
+      this.initialization = this.store.failInterrupted().catch((error: unknown) => {
+        this.initialization = null;
+        throw error;
+      });
+    }
+    await this.initialization;
+  }
+
+  async submit(articleUrl: string): Promise<LocalJob | null> {
+    await this.initialize();
+    if (this.running + this.waiting.length + this.reserved >= MAX_RUNNING + MAX_WAITING) return null;
+    this.reserved++;
+    try {
+      const job = await this.store.create(articleUrl);
+      this.waiting.push(job);
+      return job;
+    } finally {
+      this.reserved--;
+      this.pump();
+    }
+  }
+
+  private pump() {
+    while (this.running < MAX_RUNNING && this.waiting.length > 0) {
+      const job = this.waiting.shift()!;
+      this.running++;
+      void this.execute(job).finally(() => {
+        this.running--;
+        this.pump();
+      });
+    }
   }
 
   private async run(job: LocalJob) {
