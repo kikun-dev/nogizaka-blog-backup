@@ -32,7 +32,7 @@ try {
       author: '<div class="com-blog-circle"><a href="/s/s46/diary/blog/list?ct=70"><p class="name">浅井 恋乃未</p></a><a href="/s/s46/diary/blog/list?ct=06"><p class="name">小池 美波</p></a></div>',
       article: '<ul class="com-blog-part"><li class="box"><a href="/s/s46/diary/detail/101?cd=blog"><p class="date-title"><span class="date">2026/10/19</span><span class="title">　</span></p><p class="lead">記事の冒頭文です</p></a></li></ul><ul class="com-blog-minipart"><li class="box"><a href="/s/s46/diary/detail/999?cd=blog">共通新着</a></li></ul>',
       type: "member",
-      title: "無題の記事",
+      title: "無題のブログ",
     },
     {
       group: "hinatazaka",

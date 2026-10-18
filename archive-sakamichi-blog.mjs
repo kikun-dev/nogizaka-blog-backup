@@ -11,8 +11,8 @@ function usage() {
     --output '~/Documents/SakamichiBlogArchive'
 
 オプション:
-  --limit 3     3記事だけ処理する
-  --delay 5000  記事間を5秒空ける（既定: 3000ms）
+  --limit 3     3件だけ処理する
+  --delay 5000  ブログ間を5秒空ける（既定: 3000ms）
   --headed      ブラウザ画面を表示する
   --force       既存ファイルを上書きする
 `);

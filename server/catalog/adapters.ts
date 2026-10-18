@@ -151,7 +151,7 @@ export async function readArticles(group: BlogGroup, author: BlogAuthor, page: P
     } catch { return false; }
   }).map(({ id, title, date, url, excerpt }) => ({
     id,
-    title: clean(title) || "無題の記事",
+    title: clean(title) || "無題のブログ",
     ...(excerpt && !clean(title) ? { excerpt: clean(excerpt) } : {}),
     date: clean(date).replace(/[./]/g, "-"),
     url,

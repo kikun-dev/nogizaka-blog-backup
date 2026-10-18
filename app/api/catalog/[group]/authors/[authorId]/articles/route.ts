@@ -22,6 +22,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ grou
     return Response.json({ articles }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to load blog articles", error);
-    return Response.json({ error: "公式サイトの記事一覧を取得できませんでした。少し待って再試行してください。" }, { status: 502 });
+    return Response.json({ error: "公式サイトのブログ一覧を取得できませんでした。少し待って再試行してください。" }, { status: 502 });
   }
 }
