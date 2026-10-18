@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
+import type { BlogArticle } from "@/lib/catalog/types";
 import { localJobStore, type JobStore, type LocalJob } from "./job-store";
 
 export interface JobRunner {
   initialize(): Promise<void>;
   submit(articleUrl: string): Promise<LocalJob | null>;
+  submitPhotos(articles: BlogArticle[]): Promise<LocalJob | null>;
 }
 
 const MAX_RUNNING = 1;
@@ -32,11 +34,20 @@ export class LocalJobRunner implements JobRunner {
   }
 
   async submit(articleUrl: string): Promise<LocalJob | null> {
+    return this.enqueue(articleUrl);
+  }
+
+  async submitPhotos(articles: BlogArticle[]): Promise<LocalJob | null> {
+    if (!articles.length) throw new Error("取得対象のブログがありません。");
+    return this.enqueue(articles[0].url, { kind: "photos", requestedArticles: articles });
+  }
+
+  private async enqueue(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles">): Promise<LocalJob | null> {
     await this.initialize();
     if (this.running + this.waiting.length + this.reserved >= MAX_RUNNING + MAX_WAITING) return null;
     this.reserved++;
     try {
-      const job = await this.store.create(articleUrl);
+      const job = await this.store.create(articleUrl, options);
       this.waiting.push(job);
       return job;
     } finally {
@@ -59,6 +70,23 @@ export class LocalJobRunner implements JobRunner {
   private async run(job: LocalJob) {
     try {
       await this.store.update(job.id, { status: "running" });
+      if (job.kind === "photos") {
+        const [{ acquirePhotos }, { createPhotoZip }] = await Promise.all([
+          import("./photo-acquisition"), import("./photo-zip"),
+        ]);
+        const photoArticles = await acquirePhotos(job.requestedArticles ?? [], job.outputDirectory);
+        let photoZipReady = false;
+        try { photoZipReady = await createPhotoZip(job.outputDirectory, photoArticles); }
+        catch (error) { console.error("Failed to create photo ZIP", error); }
+        const hasUsableArticle = photoArticles.some((article) => !article.error && (article.detected === 0 || article.photos.length > 0));
+        await this.store.update(job.id, {
+          photoArticles,
+          photoZipReady,
+          status: hasUsableArticle ? "succeeded" : "failed",
+          ...(!hasUsableArticle ? { error: "写真を取得できませんでした。各ブログの結果を確認してください。" } : {}),
+        });
+        return;
+      }
       const script = path.join(process.cwd(), "archive-sakamichi-blog.mjs");
       const child = spawn(process.execPath, [
         script,

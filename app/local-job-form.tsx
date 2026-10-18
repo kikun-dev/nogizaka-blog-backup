@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import type { LocalJob } from "@/server/job-store";
+import type { SelectionRequest } from "@/lib/selection";
 import { AcquisitionPlanner } from "./acquisition-planner";
+import { PhotoGallery } from "./photo-gallery";
 
 const statusLabel = {
   queued: "開始待ち",
@@ -73,6 +75,25 @@ export function LocalJobForm() {
     }
   }
 
+  async function submitPhotoJob(selection: SelectionRequest) {
+    if (busy) return;
+    setSubmitting(true);
+    setMessage("");
+    setJob(null);
+    try {
+      const response = await fetch("/api/photo-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(selection),
+      });
+      const data = await response.json() as { job?: LocalJob; error?: string };
+      if (!response.ok || !data.job) throw new Error(data.error ?? "写真の取得を開始できませんでした。");
+      setJob(data.job);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "写真の取得を開始できませんでした。");
+    } finally { setSubmitting(false); }
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void submitJob(url);
@@ -91,7 +112,7 @@ export function LocalJobForm() {
         <p id="token-help" className="field-help">開発PCの .env.local に設定したトークンを入力してください。</p>
       </div>
 
-      {readyToken ? <AcquisitionPlanner token={readyToken} busy={busy} onSaveBlog={submitJob} />
+      {readyToken ? <AcquisitionPlanner token={readyToken} busy={busy} onSaveBlog={submitJob} onSavePhotos={submitPhotoJob} />
         : <p className="selection-start-help">トークンを入力すると取得条件を選べます。</p>}
 
       <form onSubmit={submit} className="job-form direct-url-form">
@@ -107,12 +128,14 @@ export function LocalJobForm() {
       {message && <p className="form-message" role="alert">{message}</p>}
       {job && (
         <div className="job-result" aria-live="polite">
-          <div className="job-result-top"><strong>{statusLabel[job.status]}</strong><span className={`status-dot status-${job.status}`} aria-hidden="true" /></div>
-          {job.status === "succeeded" && <p>保存先: <code>{job.outputDirectory}</code></p>}
+          <div className="job-result-top"><strong>{job.kind === "photos" && job.status === "succeeded" ? "写真を取得しました" : statusLabel[job.status]}</strong><span className={`status-dot status-${job.status}`} aria-hidden="true" /></div>
+          {job.status === "succeeded" && job.kind !== "photos" && <p>保存先: <code>{job.outputDirectory}</code></p>}
+          {job.kind === "photos" && (job.status === "queued" || job.status === "running") && <p>写真を取得しています。完了するとここに表示します。</p>}
           {job.error && <p className="form-message">{job.error}</p>}
           {job.log.length > 0 && <details><summary>処理ログを確認</summary><pre>{job.log.join("\n")}</pre></details>}
         </div>
       )}
+      {job?.kind === "photos" && job.photoArticles && <PhotoGallery job={job} />}
     </section>
   );
 }
