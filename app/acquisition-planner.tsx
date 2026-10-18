@@ -328,7 +328,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
           </fieldset>
           <fieldset className="selection-fieldset range-fieldset">
             <legend>どこまで取得する？</legend>
-            <label className="choice-row featured-choice"><input type="radio" name="selection-range" checked={range === "latest-one"} onChange={() => changeRange("latest-one")} /><span><strong>最新1件</strong><small>いつもの確認に</small></span></label>
+            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "latest-one"} onChange={() => changeRange("latest-one")} /><span><strong>最新1件</strong><small>いつもの確認に</small></span></label>
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "latest-n"} onChange={() => changeRange("latest-n")} /><span><strong>最新N件</strong><small>最大{limit}記事まで</small></span></label>
             {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">記事数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>記事を選ぶ</strong><small>ページを跨いで{limit}記事まで</small></span></label>
@@ -341,6 +341,17 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
             <div className="selection-summary" role="status">
               <strong>取得条件を確認しました</strong>
               <p>{plan.author.name}・{contentName[plan.content]}・{rangeName[plan.range]}{plan.range === "latest-n" ? `（${plan.count}件）` : plan.range === "selected" ? `（${plan.articles?.length}件）` : ""}</p>
+              {plan.range === "latest-n" && plan.previewArticles && plan.previewArticles.length < (plan.count ?? 0) &&
+                <p className="field-help">公式一覧で確認できた記事は{plan.previewArticles.length}件です。</p>}
+              {plan.previewArticles && plan.previewArticles.length > 0 && (
+                <div className="selection-summary-preview">
+                  <h4>対象の記事</h4>
+                  <ul>{plan.previewArticles.map((article) => <li key={article.id}>
+                    <strong>{article.title}</strong>
+                    <time>更新日時: {article.date || "日時不明"}</time>
+                  </li>)}</ul>
+                </div>
+              )}
               {singleBlogUrl ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(singleBlogUrl)}>{busy ? "保存中…" : "この1件を保存"}</button>
                 : <p className="field-help">{plan.content === "photos" ? "写真の表示と保存は次の機能で利用できます。" : "複数記事と全件バックアップの実行は次の機能で利用できます。"}</p>}
             </div>

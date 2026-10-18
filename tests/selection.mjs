@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { SELECTION_LIMITS, SelectionError, validateSelection, verifySelectedArticles } from "../lib/selection.ts";
+import { SELECTION_LIMITS, SelectionError, collectLatestArticles, validateSelection, verifySelectedArticles } from "../lib/selection.ts";
 import { paginateArticles } from "../lib/selection-pages.ts";
 
 const base = { group: "hinatazaka", authorId: "000", content: "photos" };
@@ -27,8 +27,8 @@ for (const invalid of [
 }
 
 const validSelection = validateSelection({ ...base, range: "selected", articles: [selectedArticle] });
-const listedPage = { items: [{ url: article, id: "123" }], page: 2, hasNext: false };
-assert.equal((await verifySelectedArticles(validSelection, async (page) => page === 2 ? listedPage : null)).length, 1);
+const listedPage = { items: [{ url: article, id: "123", title: "選択した記事", date: "2026-10-19 12:00" }], page: 2, hasNext: false };
+assert.equal((await verifySelectedArticles(validSelection, async (page) => page === 2 ? listedPage : null))[0].title, "選択した記事");
 await assert.rejects(
   verifySelectedArticles(validSelection, async () => ({ ...listedPage, items: [{ url: article.replace("123", "456"), id: "456" }] })),
   SelectionError,
@@ -43,6 +43,8 @@ const source = (page, start, count, hasNext = true) => ({
 const first = source(1, 1, 12);
 const second = source(2, 13, 13);
 const third = source(3, 26, 10, false);
+assert.deepEqual((await collectLatestArticles(20, async (page) => ({ 1: first, 2: second, 3: third })[page])).map(({ id }) => Number(id)), Array.from({ length: 20 }, (_, index) => index + 1));
+assert.equal((await collectLatestArticles(20, async () => null)).length, 0);
 const pageOne = paginateArticles(first, second, { sourcePage: 1, offset: 0 }, 1, 20);
 assert.equal(pageOne.items.length, 20);
 assert.deepEqual(pageOne.nextCursor, { sourcePage: 2, offset: 8 });

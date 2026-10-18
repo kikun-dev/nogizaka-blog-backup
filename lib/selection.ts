@@ -18,6 +18,7 @@ export type SelectionPlan = SelectionRequest & {
   author: BlogAuthor;
   maxArticles: number;
   firstArticle?: BlogArticle;
+  previewArticles?: BlogArticle[];
 };
 
 export const SELECTION_LIMITS: Readonly<Record<SelectionContent, number>> = {
@@ -90,20 +91,36 @@ export function validateSelection(input: unknown): SelectionRequest {
 export async function verifySelectedArticles(
   selection: SelectionRequest,
   loadPage: (page: number) => Promise<BlogArticlePage | null>,
-): Promise<SelectedArticle[]> {
+): Promise<BlogArticle[]> {
   if (selection.range !== "selected" || !selection.articles) return [];
   const pages = [...new Set(selection.articles.map(({ sourcePage }) => sourcePage))];
-  const officialUrls = new Map<number, Set<string>>();
+  const officialArticles = new Map<number, Map<string, BlogArticle>>();
   for (let index = 0; index < pages.length; index += 2) {
     await Promise.all(pages.slice(index, index + 2).map(async (page) => {
       const listing = await loadPage(page);
-      officialUrls.set(page, new Set(listing?.items.map(({ url }) => normalizeArticleUrl(url, undefined, selection.group)) ?? []));
+      officialArticles.set(page, new Map(listing?.items.map((article) =>
+        [normalizeArticleUrl(article.url, undefined, selection.group), article]) ?? []));
     }));
   }
-  for (const article of selection.articles) {
-    if (!officialUrls.get(article.sourcePage)?.has(article.url)) {
+  return selection.articles.map(({ url, sourcePage }) => {
+    const article = officialArticles.get(sourcePage)?.get(url);
+    if (!article) {
       throw new SelectionError("選択した記事が、このメンバーの公式一覧にありません。記事を選び直してください。");
     }
+    return article;
+  });
+}
+
+export async function collectLatestArticles(
+  count: number,
+  loadPage: (page: number) => Promise<BlogArticlePage | null>,
+): Promise<BlogArticle[]> {
+  const articles: BlogArticle[] = [];
+  for (let page = 1; page <= count && articles.length < count; page += 1) {
+    const listing = await loadPage(page);
+    if (!listing || listing.items.length === 0) break;
+    articles.push(...listing.items.slice(0, count - articles.length));
+    if (!listing.hasNext) break;
   }
-  return selection.articles;
+  return articles;
 }
