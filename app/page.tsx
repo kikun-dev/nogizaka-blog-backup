@@ -15,7 +15,7 @@ export default function Home() {
           <h1>大切な記事を、<br className="mobile-break" />手元に残す。</h1>
           <p>
             乃木坂46・櫻坂46・日向坂46の公式ブログを保存するためのツールです。
-            公式サイトの一覧から記事を選び、1件ずつ保存するローカル機能を試せます。
+            公式サイトの一覧からメンバーと取得範囲を選べます。ブログ1件の保存も試せます。
           </p>
         </div>
 
@@ -23,7 +23,7 @@ export default function Home() {
 
         <div className="next-step">
           <span className="next-step-title">これから追加する機能</span>
-          <p>写真の表示と長押し保存、記事の一括取得を順に実装します。</p>
+          <p>写真の表示と長押し保存、複数記事と全件バックアップの実行を順に実装します。</p>
         </div>
       </div>
       <footer className="site-footer">保存したファイルは、このパソコンの開発用フォルダに置かれます。</footer>
