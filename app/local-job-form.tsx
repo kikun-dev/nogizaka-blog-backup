@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
 import type { LocalJob } from "@/server/job-store";
 
@@ -14,6 +14,7 @@ const statusLabel = {
 export function LocalJobForm() {
   const [url, setUrl] = useState("");
   const [accessToken, setAccessToken] = useState("");
+  const [readyToken, setReadyToken] = useState("");
   const [group, setGroup] = useState<BlogGroup>("nogizaka");
   const [authors, setAuthors] = useState<BlogAuthor[]>([]);
   const [authorId, setAuthorId] = useState("");
@@ -22,41 +23,43 @@ export function LocalJobForm() {
   const [authorsLoading, setAuthorsLoading] = useState(false);
   const [articlesLoading, setArticlesLoading] = useState(false);
   const [catalogMessage, setCatalogMessage] = useState("");
-  const authorRequest = useRef(0);
+  const [retryCount, setRetryCount] = useState(0);
   const [job, setJob] = useState<LocalJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const activeJobId = job?.id;
   const activeStatus = job?.status;
 
-  async function loadAuthors() {
-    if (!accessToken) {
-      setCatalogMessage("ローカルアクセストークンを入力してください。");
-      return;
+  useEffect(() => {
+    if (!accessToken) return;
+    const timer = window.setTimeout(() => setReadyToken(accessToken), 600);
+    return () => window.clearTimeout(timer);
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (!readyToken) return;
+    const controller = new AbortController();
+    async function loadAuthors() {
+      setAuthorsLoading(true);
+      setCatalogMessage("");
+      try {
+        const response = await fetch(`/api/catalog/${group}/authors`, {
+          cache: "no-store",
+          headers: { Authorization: `Bearer ${readyToken}` },
+          signal: controller.signal,
+        });
+        const data = await response.json() as { authors?: BlogAuthor[]; error?: string };
+        if (!response.ok || !data.authors) throw new Error(data.error ?? "一覧を取得できませんでした。");
+        if (!controller.signal.aborted) setAuthors(data.authors);
+      } catch (error) {
+        if (!controller.signal.aborted) setCatalogMessage(error instanceof Error ? error.message : "一覧を取得できませんでした。");
+      } finally {
+        if (!controller.signal.aborted) setAuthorsLoading(false);
+      }
     }
-    const requestId = ++authorRequest.current;
-    setAuthorsLoading(true);
-    setCatalogMessage("");
-    setAuthors([]);
-    setAuthorId("");
-    setArticlePage(null);
-    setUrl("");
-    try {
-      const response = await fetch(`/api/catalog/${group}/authors`, {
-        cache: "no-store",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const data = await response.json() as { authors?: BlogAuthor[]; error?: string };
-      if (!response.ok || !data.authors) throw new Error(data.error ?? "一覧を取得できませんでした。");
-      if (requestId !== authorRequest.current) return;
-      setAuthors(data.authors);
-      if (data.authors.length === 0) setCatalogMessage("公式サイトにブログ主体が見つかりませんでした。");
-    } catch (error) {
-      if (requestId === authorRequest.current) setCatalogMessage(error instanceof Error ? error.message : "一覧を取得できませんでした。");
-    } finally {
-      if (requestId === authorRequest.current) setAuthorsLoading(false);
-    }
-  }
+    void loadAuthors();
+    return () => controller.abort();
+  }, [group, readyToken, retryCount]);
 
   useEffect(() => {
     if (!authorId) return;
@@ -68,7 +71,7 @@ export function LocalJobForm() {
       try {
         const response = await fetch(`/api/catalog/${group}/authors/${authorId}/articles?page=${pageNumber}`, {
           cache: "no-store",
-          headers: { Authorization: `Bearer ${accessToken}` },
+          headers: { Authorization: `Bearer ${readyToken}` },
           signal: controller.signal,
         });
         const data = await response.json() as { articles?: BlogArticlePage; error?: string };
@@ -83,10 +86,21 @@ export function LocalJobForm() {
     }
     void loadArticles();
     return () => controller.abort();
-  }, [group, authorId, pageNumber, accessToken]);
+  }, [group, authorId, pageNumber, readyToken, retryCount]);
+
+  function changeToken(value: string) {
+    setAccessToken(value);
+    setReadyToken("");
+    setAuthorsLoading(false);
+    setArticlesLoading(false);
+    setAuthors([]);
+    setAuthorId("");
+    setArticlePage(null);
+    setPageNumber(1);
+    setCatalogMessage("");
+  }
 
   function selectGroup(value: BlogGroup) {
-    authorRequest.current += 1;
     setGroup(value);
     setAuthorsLoading(false);
     setArticlesLoading(false);
@@ -174,7 +188,7 @@ export function LocalJobForm() {
           autoComplete="off"
           required
           value={accessToken}
-          onChange={(event) => setAccessToken(event.target.value)}
+          onChange={(event) => changeToken(event.target.value)}
           aria-describedby="token-help"
         />
         <p id="token-help" className="field-help">開発 PC の .env.local に設定したトークンを入力してください。</p>
@@ -189,13 +203,12 @@ export function LocalJobForm() {
                 <option value="hinatazaka">日向坂46</option>
               </select>
             </div>
-            <button type="button" className="secondary-button" onClick={() => void loadAuthors()} disabled={authorsLoading}>
-              {authorsLoading ? "読み込み中…" : "ブログ主体を表示"}
-            </button>
           </div>
+          {!readyToken && <p className="field-help">トークンを入力するとメンバー一覧を読み込みます。</p>}
+          {authorsLoading && <p className="field-help" role="status">メンバー一覧を読み込んでいます…</p>}
           {authors.length > 0 && (
             <div className="catalog-author-field">
-              <label htmlFor="blog-author">ブログ主体</label>
+              <label htmlFor="blog-author">メンバー</label>
               <select id="blog-author" value={authorId} onChange={(event) => selectAuthor(event.target.value)}>
                 <option value="">選択してください</option>
                 {authors.map((author) => <option key={author.id} value={author.id}>{author.name}{author.type !== "member" ? `（${{
@@ -204,7 +217,7 @@ export function LocalJobForm() {
               </select>
             </div>
           )}
-          {catalogMessage && <p className="form-message" role="alert">{catalogMessage}</p>}
+          {catalogMessage && <div className="catalog-error" role="alert"><p className="form-message">{catalogMessage}</p><button type="button" className="secondary-button" onClick={() => setRetryCount((count) => count + 1)}>再試行</button></div>}
           {articlesLoading && authorId && <p className="field-help" role="status">記事一覧を読み込んでいます…</p>}
           {articlePage && (
             <div className="catalog-articles">

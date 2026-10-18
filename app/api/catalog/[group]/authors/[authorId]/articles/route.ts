@@ -9,7 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ grou
   if (denied) return denied;
   const { group, authorId } = await params;
   if (!isBlogGroup(group) || !isAuthorId(authorId)) {
-    return Response.json({ error: "対象外のブログ主体です。" }, { status: 404 });
+    return Response.json({ error: "対象外のメンバーです。" }, { status: 404 });
   }
   const requestedPage = new URL(request.url).searchParams.get("page") ?? "1";
   const page = Number(requestedPage);
@@ -18,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ grou
   }
   try {
     const articles = await getArticlePage(group, authorId, page);
-    if (!articles) return Response.json({ error: "公式一覧にないブログ主体です。" }, { status: 404 });
+    if (!articles) return Response.json({ error: "公式一覧にないメンバーです。" }, { status: 404 });
     return Response.json({ articles }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to load blog articles", error);

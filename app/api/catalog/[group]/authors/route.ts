@@ -13,6 +13,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ grou
     return Response.json({ authors: await getAuthors(group) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to load blog authors", error);
-    return Response.json({ error: "公式サイトのブログ主体一覧を取得できませんでした。少し待って再試行してください。" }, { status: 502 });
+    return Response.json({ error: "公式サイトのメンバー一覧を取得できませんでした。少し待って再試行してください。" }, { status: 502 });
   }
 }

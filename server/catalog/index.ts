@@ -36,7 +36,12 @@ async function withListingPage<T>(url: string, read: (page: Page) => Promise<T>)
       });
       const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
       if (!response?.ok()) throw new Error(`公式サイトの一覧を取得できませんでした（HTTP ${response?.status() ?? "不明"}）。`);
-      if (new URL(page.url()).origin !== new URL(url).origin) throw new Error("公式サイト以外へ移動したため、一覧を取得できませんでした。");
+      const requested = new URL(url);
+      const actual = new URL(page.url());
+      if (actual.origin !== requested.origin || actual.pathname !== requested.pathname ||
+          (requested.searchParams.has("ct") && actual.searchParams.get("ct") !== requested.searchParams.get("ct"))) {
+        throw new Error("公式サイトの一覧URLが別のページへ移動したため、取得できませんでした。");
+      }
       return await read(page);
     } finally {
       await browser?.close();

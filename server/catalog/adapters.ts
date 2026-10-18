@@ -12,6 +12,8 @@ type SiteAdapter = {
 };
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
+// The official Sakurazaka selector still links to ct=06, but that URL now redirects to Not Found.
+const unavailableSakurazakaAuthorIds = new Set(["06"]);
 
 const adapters: Record<BlogGroup, SiteAdapter> = {
   nogizaka: {
@@ -127,13 +129,14 @@ export async function readAuthors(group: BlogGroup, page: Page): Promise<BlogAut
   const seen = new Set<string>();
   const authors = raw.filter(({ id, name }) => {
     if (!isAuthorId(id) || !clean(name) || seen.has(id)) return false;
+    if (group === "sakurazaka" && unavailableSakurazakaAuthorIds.has(id)) return false;
     seen.add(id);
     return true;
   }).map(({ id, name }) => ({
     id, name: clean(name), type: authorType(group, name), group,
     listUrl: authorListUrl(group, id),
   }));
-  if (authors.length === 0) throw new Error("公式サイトのブログ主体一覧を読み取れませんでした。");
+  if (authors.length === 0) throw new Error("公式サイトのメンバー一覧を読み取れませんでした。");
   return authors;
 }
 
