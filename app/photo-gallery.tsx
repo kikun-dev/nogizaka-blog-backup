@@ -4,16 +4,12 @@ export function PhotoGallery({ job }: { job: LocalJob }) {
   const articles = job.photoArticles ?? [];
   const totalPhotos = articles.reduce((sum, article) => sum + article.photos.length, 0);
   return (
-    <section className="photo-gallery" aria-labelledby="photo-gallery-heading">
+    <section className="photo-gallery" aria-label="ブログごとの写真">
       <div className="photo-gallery-heading">
-        <div>
-          <h3 id="photo-gallery-heading">取得した写真</h3>
-          <p>{articles.length}件のブログ・写真{totalPhotos}枚</p>
-        </div>
+        <p>{articles.length}件のブログ・写真{totalPhotos}枚</p>
         {job.photoZipReady && <a className="secondary-button photo-zip-link" href={`/api/photo-jobs/${job.id}/zip`}>写真をZIPで保存</a>}
       </div>
-      <p className="photo-save-help">iPhone・iPadは写真を長押しして「写真に保存」、Androidは長押しして「画像をダウンロード」を選んでください。</p>
-      {job.photoZipReady && <p className="field-help">ZIPは「ファイル」アプリなどに保存されます。写真アプリには直接入りません。</p>}
+      <p className="photo-save-help">写真を長押しして保存します。<br />iPhone・iPad：「写真に保存」／Android：「画像をダウンロード」</p>
       {articles.map((article) => (
         <article className="photo-article" key={article.id}>
           <div className="photo-article-heading">
@@ -37,6 +33,7 @@ export function PhotoGallery({ job }: { job: LocalJob }) {
           </div>
         </article>
       ))}
+      {job.photoZipReady && <p className="field-help photo-zip-help">ZIPは「ファイル」アプリなどに保存されます。写真アプリには直接入りません。</p>}
     </section>
   );
 }
