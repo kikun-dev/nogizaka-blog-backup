@@ -1,7 +1,7 @@
 import { chromium, type Page } from "playwright";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, unlink } from "node:fs/promises";
 import path from "node:path";
-import type { BlogArticle } from "@/lib/catalog/types";
+import type { BlogArticle, BlogGroup } from "@/lib/catalog/types";
 import { normalizeArticleUrl } from "@/lib/archive/urls.mjs";
 import type { PhotoArticle, SavedPhoto } from "./job-store";
 
@@ -14,11 +14,12 @@ const imageTypes: Record<string, string> = {
 
 type ImageCandidate = { urls: string[] };
 
-function allowedImageUrl(value: string, article: BlogArticle): boolean {
+function allowedImageUrl(value: string, group: BlogGroup): boolean {
   try {
     const url = new URL(value);
-    const domain = { nogizaka: "nogizaka46.com", sakurazaka: "sakurazaka46.com", hinatazaka: "hinatazaka46.com" }[article.author.group];
-    return url.protocol === "https:" && (url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    const domain = { nogizaka: "nogizaka46.com", sakurazaka: "sakurazaka46.com", hinatazaka: "hinatazaka46.com" }[group];
+    return url.protocol === "https:" && !url.username && !url.password && (!url.port || url.port === "443")
+      && (url.hostname === domain || url.hostname.endsWith(`.${domain}`));
   } catch { return false; }
 }
 
@@ -60,19 +61,93 @@ function validImage(bytes: Buffer, mimeType: string): boolean {
   return false;
 }
 
+export async function savePhotoSource(
+  url: string,
+  group: BlogGroup,
+  referer: string,
+  directory: string,
+  number: number,
+  { fetcher = fetch, maxBytes = MAX_IMAGE_BYTES }: { fetcher?: typeof fetch; maxBytes?: number } = {},
+): Promise<SavedPhoto | null> {
+  if (!allowedImageUrl(url, group)) return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  timeout.unref();
+  try {
+    let current = url;
+    for (let redirects = 0; redirects <= 3; redirects++) {
+      if (!allowedImageUrl(current, group)) return null;
+      const response = await fetcher(current, {
+        headers: { Referer: referer }, redirect: "manual", signal: controller.signal,
+      });
+      try {
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get("location");
+          if (!location || redirects === 3) return null;
+          current = new URL(location, current).href;
+          continue;
+        }
+        const mimeType = response.headers.get("content-type")?.split(";")[0]?.toLowerCase() ?? "";
+        if (!response.ok || !imageTypes[mimeType] || !response.body) return null;
+        const declaredSize = response.headers.get("content-length");
+        if (declaredSize && /^\d+$/.test(declaredSize) && Number(declaredSize) > maxBytes) return null;
+
+        const name = `photo-${String(number).padStart(3, "0")}.${imageTypes[mimeType]}`;
+        const destination = path.join(directory, name);
+        const temporary = `${destination}.part`;
+        const reader = response.body.getReader();
+        const file = await open(temporary, "w");
+        let committed = false;
+        let size = 0;
+        const signature = Buffer.alloc(16);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (size + value.byteLength > maxBytes) return null;
+            if (size < signature.length) {
+              Buffer.from(value).copy(signature, size, 0, Math.min(value.byteLength, signature.length - size));
+            }
+            size += value.byteLength;
+            await file.writeFile(value);
+          }
+          if (!size || !validImage(signature, mimeType)) return null;
+          await file.close();
+          await rename(temporary, destination);
+          committed = true;
+          return { name, mimeType };
+        } finally {
+          await reader.cancel().catch(() => {});
+          reader.releaseLock();
+          if (!committed) {
+            await file.close().catch(() => {});
+            await unlink(temporary).catch(() => {});
+          }
+        }
+      } finally {
+        await response.body?.cancel().catch(() => {});
+      }
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
+}
+
 export async function acquirePhotos(articles: BlogArticle[], outputDirectory: string): Promise<PhotoArticle[]> {
   const browser = await chromium.launch({ headless: true });
   const results: PhotoArticle[] = [];
   try {
-    const context = await browser.newContext({ locale: "ja-JP" });
-    const page = await context.newPage();
     for (const article of articles) {
+      const context = await browser.newContext({ locale: "ja-JP" });
       const result: PhotoArticle = {
         id: article.id, title: article.title, date: article.date, authorName: article.author.name,
         photos: [], detected: 0, failed: 0,
       };
       results.push(result);
       try {
+        const page = await context.newPage();
         const expected = normalizeArticleUrl(article.url, undefined, article.author.group);
         const response = await page.goto(expected, { waitUntil: "domcontentloaded", timeout: 60_000 });
         if (!response?.ok() || new URL(normalizeArticleUrl(page.url(), undefined, article.author.group)).pathname !== new URL(expected).pathname) {
@@ -95,18 +170,12 @@ export async function acquirePhotos(articles: BlogArticle[], outputDirectory: st
         for (const candidate of candidates.slice(0, MAX_PHOTOS_PER_ARTICLE)) {
           let saved: SavedPhoto | undefined;
           for (const url of candidate.urls) {
-            if (!allowedImageUrl(url, article)) continue;
             try {
-              const image = await context.request.get(url, { timeout: 30_000, maxRedirects: 0, failOnStatusCode: false, headers: { Referer: page.url() } });
-              const mimeType = image.headers()["content-type"]?.split(";")[0]?.toLowerCase() ?? "";
-              if (!image.ok() || !imageTypes[mimeType] || Number(image.headers()["content-length"] ?? 0) > MAX_IMAGE_BYTES) continue;
-              const bytes = await image.body();
-              if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || !validImage(bytes, mimeType)) continue;
-              if (seen.has(url)) { saved = { name: "", mimeType }; break; }
-              const name = `photo-${String(result.photos.length + 1).padStart(3, "0")}.${imageTypes[mimeType]}`;
-              await writeFile(path.join(directory, name), bytes);
+              if (seen.has(url)) { saved = { name: "", mimeType: "" }; break; }
+              const image = await savePhotoSource(url, article.author.group, page.url(), directory, result.photos.length + 1);
+              if (!image) continue;
               seen.add(url);
-              saved = { name, mimeType };
+              saved = image;
               result.photos.push(saved);
               break;
             } catch { /* Try the next candidate, then count a failure. */ }
@@ -116,6 +185,8 @@ export async function acquirePhotos(articles: BlogArticle[], outputDirectory: st
         result.failed += Math.max(0, candidates.length - MAX_PHOTOS_PER_ARTICLE);
       } catch (error) {
         result.error = error instanceof Error ? error.message : "ブログ本文を取得できませんでした。";
+      } finally {
+        await context.close();
       }
     }
     return results;

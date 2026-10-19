@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +13,7 @@ registerHooks({
   },
 });
 
-const { extractPhotoCandidates } = await import("../server/photo-acquisition.ts");
+const { extractPhotoCandidates, savePhotoSource } = await import("../server/photo-acquisition.ts");
 const { createPhotoZip, crc32 } = await import("../server/photo-zip.ts");
 const { checkPhotoSession, photoSessionCookie } = await import("../server/photo-session.ts");
 
@@ -49,6 +49,47 @@ test("writes a ZIP containing the saved photos by blog", async () => {
     assert.equal(zip.readUInt32LE(14), crc32(bytes));
     assert.equal(zip.toString("utf8", 30, 30 + "blog-123/photo-001.jpg".length), "blog-123/photo-001.jpg");
     assert.equal(zip.readUInt32LE(zip.length - 22), 0x06054b50);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("streams images to disk and stops an unknown-size response at the byte limit", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sakamichi-photo-stream-"));
+  const url = "https://cdn.hinatazaka46.com/photo.jpg";
+  try {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const small = await savePhotoSource(url, "hinatazaka", "https://www.hinatazaka46.com/blog", directory, 1, {
+      maxBytes: 8,
+      fetcher: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(jpeg); controller.close(); } }), {
+        headers: { "Content-Type": "image/jpeg" },
+      }),
+    });
+    assert.equal(small?.name, "photo-001.jpg");
+    assert.deepEqual(await readFile(path.join(directory, "photo-001.jpg")), Buffer.from(jpeg));
+
+    let produced = 0;
+    const tooLarge = await savePhotoSource(url, "hinatazaka", "https://www.hinatazaka46.com/blog", directory, 2, {
+      maxBytes: 8,
+      fetcher: async () => new Response(new ReadableStream({ pull(controller) {
+        produced += 1;
+        controller.enqueue(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]));
+      } }), { headers: { "Content-Type": "image/jpeg" } }),
+    });
+    assert.equal(tooLarge, null);
+    assert.ok(produced < 10, "the download should stop during the stream");
+    assert.deepEqual(await readdir(directory), ["photo-001.jpg"]);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("rejects image redirects outside the official domain", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "sakamichi-photo-redirect-"));
+  let requests = 0;
+  try {
+    const result = await savePhotoSource("https://sakurazaka46.com/photo.jpg", "sakurazaka", "https://sakurazaka46.com/blog", directory, 1, {
+      fetcher: async () => { requests += 1; return Response.redirect("http://127.0.0.1/private"); },
+    });
+    assert.equal(result, null);
+    assert.equal(requests, 1);
+    assert.deepEqual(await readdir(directory), []);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
