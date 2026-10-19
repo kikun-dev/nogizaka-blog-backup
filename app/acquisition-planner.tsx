@@ -15,10 +15,11 @@ const rangeName = {
   all: "全件バックアップ",
 } as const;
 
-export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
+export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   token: string;
   busy: boolean;
   onSaveBlog: (url: string) => Promise<void>;
+  onSavePhotos: (selection: SelectionRequest) => Promise<void>;
 }) {
   const [group, setGroup] = useState<BlogGroup>("nogizaka");
   const [authors, setAuthors] = useState<BlogAuthor[]>([]);
@@ -352,8 +353,10 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog }: {
                   </li>)}</ul>
                 </div>
               )}
-              {singleBlogUrl ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(singleBlogUrl)}>{busy ? "保存中…" : "この1件を保存"}</button>
-                : <p className="field-help">{plan.content === "photos" ? "写真の表示と保存は次の機能で利用できます。" : "複数件のブログと全件バックアップの実行は次の機能で利用できます。"}</p>}
+              {plan.content === "photos" && plan.range !== "all" ?
+                <button type="button" className="primary-button" disabled={busy} onClick={() => void onSavePhotos(validateSelection(plan))}>{busy ? "取得中…" : `写真を取得（${plan.previewArticles?.length ?? 0}件）`}</button>
+                : singleBlogUrl ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(singleBlogUrl)}>{busy ? "保存中…" : "この1件を保存"}</button>
+                : <p className="field-help">{plan.range === "all" ? "全件バックアップの実行は次の機能で利用できます。" : "複数件のブログ保存は次の機能で利用できます。"}</p>}
             </div>
           )}
         </>

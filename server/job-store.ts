@@ -1,12 +1,29 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { BlogArticle } from "@/lib/catalog/types";
+
+export type SavedPhoto = { name: string; mimeType: string };
+export type PhotoArticle = {
+  id: string;
+  title: string;
+  date: string;
+  authorName: string;
+  photos: SavedPhoto[];
+  detected: number;
+  failed: number;
+  error?: string;
+};
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type LocalJob = {
   id: string;
   articleUrl: string;
+  kind?: "blog" | "photos";
+  requestedArticles?: BlogArticle[];
+  photoArticles?: PhotoArticle[];
+  photoZipReady?: boolean;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
@@ -16,7 +33,7 @@ export type LocalJob = {
 };
 
 export interface JobStore {
-  create(articleUrl: string): Promise<LocalJob>;
+  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles">): Promise<LocalJob>;
   get(id: string): Promise<LocalJob | null>;
   update(id: string, change: Partial<LocalJob>): Promise<LocalJob>;
   failInterrupted(): Promise<void>;
@@ -41,12 +58,13 @@ async function save(job: LocalJob) {
 }
 
 export const localJobStore: JobStore = {
-  async create(articleUrl) {
+  async create(articleUrl, options) {
     const id = randomUUID();
     const now = new Date().toISOString();
     const job: LocalJob = {
       id,
       articleUrl,
+      ...options,
       status: "queued",
       createdAt: now,
       updatedAt: now,
