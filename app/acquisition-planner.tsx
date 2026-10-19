@@ -5,7 +5,7 @@ import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types
 import { paginateArticles, type ArticleCursor, type ListedArticle, type SelectionArticlePage } from "@/lib/selection-pages";
 import { SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest } from "@/lib/selection";
 
-type Stage = "conditions" | "articles" | "bulk";
+type Stage = "conditions" | "articles";
 
 const contentName = { photos: "写真のみ", blog: "ブログ" } as const;
 const rangeName = {
@@ -290,15 +290,6 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             <button type="button" className="primary-button" disabled={selectedCount === 0 || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "選択を確定"}</button>
           </div>
         </div>
-      ) : stage === "bulk" ? (
-        <div className="bulk-screen">
-          <button type="button" className="text-button" onClick={() => { setStage("conditions"); changeRange("latest-one"); }}>通常の取得に戻る</button>
-          <h4>全件バックアップ</h4>
-          <p>対象のブログをすべて扱う重い処理です。通常の取得とは分けて条件を確認します。</p>
-          <p className="field-help">1回に最大10件を保存します。完了後の結果画面から次の10件を開始できます。ZIPは回ごとに分かれます。</p>
-          {message && <p className="form-message" role="alert">{message}</p>}
-          <button type="button" className="secondary-button" disabled={!authorId || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "全件バックアップの条件を確認"}</button>
-        </div>
       ) : (
         <>
           <div className="selection-field">
@@ -330,10 +321,15 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">ブログの件数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>ブログを選ぶ</strong><small>ページを跨いで{limit}件まで</small></span></label>
             {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorId} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
+            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog"} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
+            {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
+              <strong>全件バックアップについて</strong>
+              <p>保存に時間がかかるため、1回に最大10件ずつ処理します。完了後、結果画面から次の10件へ進めます。</p>
+              <p>ZIPは回ごとに分かれます。各回のファイルは開発PCのフォルダーにも残ります。1回の出力とZIPは、それぞれ512 MBまでです。</p>
+            </div>}
           </fieldset>
-          {content === "blog" && <div className="bulk-entry"><strong>全件バックアップ</strong><p>大量のブログを扱うため、別の手順で設定します。</p><button type="button" className="text-button" disabled={!authorId} onClick={() => { changeRange("all"); setStage("bulk"); }}>全件バックアップの条件を設定</button></div>}
           {message && <div role="alert" className="catalog-error"><p className="form-message">{message}</p>{authors.length === 0 && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>一覧を再読み込み</button>}</div>}
-          {range !== "selected" && range !== "all" && <button type="button" className="primary-button selection-confirm" disabled={!authorId || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "この条件を確認"}</button>}
+          {range !== "selected" && <button type="button" className="primary-button selection-confirm" disabled={!authorId || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "この条件を確認"}</button>}
           {plan && (
             <div className="selection-summary" role="status">
               <strong>取得条件を確認しました</strong>
@@ -351,7 +347,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
               )}
               {plan.content === "photos" && plan.range !== "all" ?
                 <button type="button" className="primary-button" disabled={busy} onClick={() => void onSavePhotos(validateSelection(plan))}>{busy ? "取得中…" : `写真を取得（${plan.previewArticles?.length ?? 0}件）`}</button>
-                : plan.content === "blog" ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(validateSelection(plan))}>{busy ? "保存中…" : plan.range === "all" ? `最初の${plan.previewArticles?.length ?? 0}件を保存` : `ブログを保存（${plan.previewArticles?.length ?? 0}件）`}</button>
+                : plan.content === "blog" ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(validateSelection(plan))}>{busy ? "保存中…" : plan.range === "all" ? `全件バックアップを開始（まず${plan.previewArticles?.length ?? 0}件）` : `ブログを保存（${plan.previewArticles?.length ?? 0}件）`}</button>
                 : null}
             </div>
           )}

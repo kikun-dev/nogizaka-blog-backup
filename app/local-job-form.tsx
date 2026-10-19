@@ -198,7 +198,7 @@ export function LocalJobForm() {
       <h1>大切なブログを、<br className="mobile-break" />手元に残す。</h1>
       <p>
         乃木坂46・櫻坂46・日向坂46の公式ブログを保存するためのツールです。
-        公式サイトの一覧からメンバーと取得範囲を選べます。写真の閲覧・保存と、ブログ1件の保存ができます。
+        公式サイトの一覧からメンバーと取得範囲を選べます。写真の閲覧・保存と、ブログの複数件・全件バックアップができます。
       </p>
     </div>}
     <section ref={setupRef} className="workspace" aria-labelledby="workspace-title" hidden={view !== "setup"}>
