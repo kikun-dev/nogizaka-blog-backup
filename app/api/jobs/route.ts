@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { parseArticleUrl } from "@/server/article-url";
 import { localJobRunner } from "@/server/job-runner";
 import { checkLocalAccess } from "@/server/local-access";
+import { blogSessionCookie } from "@/server/blog-session";
 
 export const runtime = "nodejs";
 
@@ -19,5 +20,5 @@ export async function POST(request: Request) {
 
   const job = await localJobRunner.submit(articleUrl);
   if (!job) return NextResponse.json({ error: "待機中のジョブが上限に達しています。後で再試行してください。" }, { status: 429 });
-  return NextResponse.json({ job }, { status: 202 });
+  return NextResponse.json({ job }, { status: 202, headers: { "Set-Cookie": blogSessionCookie(request), "Cache-Control": "no-store" } });
 }

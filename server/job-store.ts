@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BlogArticle } from "@/lib/catalog/types";
+import type { BlogArticle, BlogAuthor } from "@/lib/catalog/types";
+import type { BulkCursor } from "@/lib/selection";
 
 export type SavedPhoto = { name: string; mimeType: string };
 export type PhotoArticle = {
@@ -22,6 +23,11 @@ export type LocalJob = {
   articleUrl: string;
   kind?: "blog" | "photos";
   requestedArticles?: BlogArticle[];
+  requestedAuthor?: BlogAuthor;
+  nextCursor?: BulkCursor;
+  blogZipReady?: boolean;
+  savedCount?: number;
+  outputBytes?: number;
   photoArticles?: PhotoArticle[];
   photoZipReady?: boolean;
   status: JobStatus;
@@ -33,7 +39,7 @@ export type LocalJob = {
 };
 
 export interface JobStore {
-  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles">): Promise<LocalJob>;
+  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor">): Promise<LocalJob>;
   get(id: string): Promise<LocalJob | null>;
   update(id: string, change: Partial<LocalJob>): Promise<LocalJob>;
   failInterrupted(): Promise<void>;

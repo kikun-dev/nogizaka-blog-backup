@@ -31,5 +31,20 @@ export function archiveArticles(
   dependencies?: { logger?: ArchiveLogger },
 ): Promise<{ processed: number; directory: string | null }>;
 
+export function archiveWebArticles(
+  options: {
+    articles: { url: string }[];
+    output: string;
+    author?: { id: string; name: string; type: string; group: string };
+    maxBytes?: number;
+  },
+  dependencies?: { logger?: ArchiveLogger; onProgress?: (count: number, bytes: number) => Promise<void> },
+): Promise<{
+  saved: { directory: string; metadata: { id: string; title: string; date: string; url: string } }[];
+  totalBytes: number;
+  authorName: string;
+  groupName: string;
+}>;
+
 export function normalizeArticleUrl(url: string, baseUrl?: string, expectedGroupKey?: string): string;
 export function sameAuthor(left: string, right: string): boolean;

@@ -4,6 +4,7 @@ import type { BlogArticle, BlogArticlePage, BlogAuthor, BlogGroup } from "./cata
 export type SelectionContent = "photos" | "blog";
 export type SelectionRange = "latest-one" | "latest-n" | "selected" | "all";
 export type SelectedArticle = { url: string; sourcePage: number };
+export type BulkCursor = { page: number; offset: number };
 
 export type SelectionRequest = {
   group: BlogGroup;
@@ -12,6 +13,7 @@ export type SelectionRequest = {
   range: SelectionRange;
   count?: number;
   articles?: SelectedArticle[];
+  cursor?: BulkCursor;
 };
 
 export type SelectionPlan = SelectionRequest & {
@@ -85,7 +87,49 @@ export function validateSelection(input: unknown): SelectionRequest {
     throw new SelectionError("ブログの指定が取得範囲と一致しません。");
   }
 
+  if (value.range === "all" && value.content !== "blog") {
+    throw new SelectionError("全件バックアップはブログ保存で選択してください。");
+  }
+  if (value.range === "all" && value.cursor !== undefined) {
+    const cursor = value.cursor as Record<string, unknown> | null;
+    if (!cursor || typeof cursor !== "object" || !Number.isSafeInteger(cursor.page) || !Number.isSafeInteger(cursor.offset)
+      || (cursor.page as number) < 1 || (cursor.page as number) > 10000 || (cursor.offset as number) < 0 || (cursor.offset as number) > 1000) {
+      throw new SelectionError("全件バックアップの続きの位置を確認してください。");
+    }
+    selection.cursor = { page: cursor.page as number, offset: cursor.offset as number };
+  } else if (value.range !== "all" && value.cursor !== undefined) {
+    throw new SelectionError("続きの位置が取得範囲と一致しません。");
+  }
+
   return selection;
+}
+
+export async function collectBulkBatch(
+  loadPage: (page: number) => Promise<BlogArticlePage | null>,
+  cursor: BulkCursor = { page: 1, offset: 0 },
+  limit = SELECTION_LIMITS.blog,
+): Promise<{ articles: BlogArticle[]; nextCursor?: BulkCursor }> {
+  const articles: BlogArticle[] = [];
+  let { page, offset } = cursor;
+  while (articles.length < limit && page <= 10000) {
+    const listing = await loadPage(page);
+    if (!listing || !listing.items.length) return { articles };
+    if (offset >= listing.items.length) {
+      if (!listing.hasNext) return { articles };
+      page += 1;
+      offset = 0;
+      continue;
+    }
+    const take = Math.min(limit - articles.length, listing.items.length - offset);
+    articles.push(...listing.items.slice(offset, offset + take));
+    offset += take;
+    if (offset === listing.items.length) {
+      if (!listing.hasNext) return { articles };
+      page += 1;
+      offset = 0;
+    }
+  }
+  return { articles, nextCursor: page <= 10000 ? { page, offset } : undefined };
 }
 
 export async function verifySelectedArticles(

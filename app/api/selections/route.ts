@@ -1,6 +1,6 @@
 import { getArticlePage, getAuthors } from "@/server/catalog";
 import { checkLocalAccess } from "@/server/local-access";
-import { SELECTION_LIMITS, SelectionError, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
+import { SELECTION_LIMITS, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
 
 export const runtime = "nodejs";
 
@@ -25,8 +25,8 @@ export async function POST(request: Request) {
       ? await verifySelectedArticles(selection, loadPage)
       : selection.range === "latest-one" || selection.range === "latest-n"
         ? await collectLatestArticles(selection.range === "latest-one" ? 1 : selection.count!, loadPage)
-        : [];
-    if ((selection.range === "latest-one" || selection.range === "latest-n") && previewArticles.length === 0) {
+        : (await collectBulkBatch(loadPage, selection.cursor)).articles;
+    if (previewArticles.length === 0) {
       return Response.json({ error: "ブログが見つかりませんでした。" }, { status: 404 });
     }
     return Response.json({

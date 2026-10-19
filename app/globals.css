@@ -180,6 +180,8 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .job-result details { margin-top: 12px; }
 .job-result summary { cursor: pointer; font-size: 14px; }
 .job-result pre { overflow: auto; max-height: 240px; padding: 12px; border-radius: 7px; background: var(--bg); font-size: 12px; }
+.job-result > .primary-button { display: inline-flex; align-items: center; justify-content: center; max-width: 100%; margin-top: 16px; text-align: center; text-decoration: none; }
+.job-result > .secondary-button { width: 100%; margin-top: 20px; }
 .photo-reopen { width: 100%; margin: 0 0 20px; }
 .photo-result-screen { margin: 34px 0 70px; }
 .photo-result-screen h2 { margin: 24px 0 0; }

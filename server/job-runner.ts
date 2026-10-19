@@ -1,12 +1,12 @@
-import { spawn } from "node:child_process";
-import path from "node:path";
-import type { BlogArticle } from "@/lib/catalog/types";
+import type { BlogArticle, BlogAuthor } from "@/lib/catalog/types";
+import type { BulkCursor } from "@/lib/selection";
 import { localJobStore, type JobStore, type LocalJob } from "./job-store";
 
 export interface JobRunner {
   initialize(): Promise<void>;
   submit(articleUrl: string): Promise<LocalJob | null>;
   submitPhotos(articles: BlogArticle[]): Promise<LocalJob | null>;
+  submitBlogs(articles: BlogArticle[], author: BlogAuthor, nextCursor?: BulkCursor): Promise<LocalJob | null>;
 }
 
 const MAX_RUNNING = 1;
@@ -34,7 +34,7 @@ export class LocalJobRunner implements JobRunner {
   }
 
   async submit(articleUrl: string): Promise<LocalJob | null> {
-    return this.enqueue(articleUrl);
+    return this.enqueue(articleUrl, { kind: "blog" });
   }
 
   async submitPhotos(articles: BlogArticle[]): Promise<LocalJob | null> {
@@ -42,7 +42,12 @@ export class LocalJobRunner implements JobRunner {
     return this.enqueue(articles[0].url, { kind: "photos", requestedArticles: articles });
   }
 
-  private async enqueue(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles">): Promise<LocalJob | null> {
+  async submitBlogs(articles: BlogArticle[], author: BlogAuthor, nextCursor?: BulkCursor): Promise<LocalJob | null> {
+    if (!articles.length || articles.length > 10) throw new Error("ブログは1回10件まで保存できます。");
+    return this.enqueue(articles[0].url, { kind: "blog", requestedArticles: articles, requestedAuthor: author, nextCursor });
+  }
+
+  private async enqueue(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor">): Promise<LocalJob | null> {
     await this.initialize();
     if (this.running + this.waiting.length + this.reserved >= MAX_RUNNING + MAX_WAITING) return null;
     this.reserved++;
@@ -87,52 +92,25 @@ export class LocalJobRunner implements JobRunner {
         });
         return;
       }
-      const script = path.join(process.cwd(), "archive-sakamichi-blog.mjs");
-      const child = spawn(process.execPath, [
-        script,
-        "--url", job.articleUrl,
-        "--output", job.outputDirectory,
-        "--limit", "1",
-      ], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
-
-      let pending = Promise.resolve();
-      let transcript = "";
-      const append = (chunk: Buffer) => {
-        transcript += chunk.toString("utf8");
-        const lines = transcript.split(/\r?\n/);
-        transcript = lines.pop() ?? "";
-        if (!lines.length) return;
-        pending = pending.then(async () => {
-          const current = await this.store.get(job.id);
-          if (current) {
-            await this.store.update(job.id, {
-              log: [...current.log, ...lines].slice(-80),
-            });
-          }
-        });
-      };
-      child.stdout.on("data", append);
-      child.stderr.on("data", append);
-
-      const result = await new Promise<{ code: number | null; error?: Error }>((resolve) => {
-        child.once("error", (error) => resolve({ code: null, error }));
-        child.once("close", (code) => resolve({ code }));
+      const [{ archiveWebArticles }, { createBlogZip }] = await Promise.all([
+        import("./archive-engine"), import("./blog-zip"),
+      ]);
+      const log: string[] = [];
+      const result = await archiveWebArticles({
+        articles: job.requestedArticles ?? [{ url: job.articleUrl }],
+        output: job.outputDirectory,
+        author: job.requestedAuthor,
+      }, {
+        logger: { log: (line: string) => { log.push(line); }, warn: (line: string) => { log.push(line); } },
+        onProgress: async (count: number, bytes: number) => {
+          await this.store.update(job.id, { savedCount: count, outputBytes: bytes, log: log.slice(-80) });
+        },
       });
-      if (transcript) {
-        const lastLine = transcript;
-        pending = pending.then(async () => {
-          const current = await this.store.get(job.id);
-          if (current) {
-            await this.store.update(job.id, {
-              log: [...current.log, lastLine].slice(-80),
-            });
-          }
-        });
-      }
-      await pending;
-      await this.store.update(job.id, result.code === 0
-        ? { status: "succeeded" }
-        : { status: "failed", error: result.error?.message ?? "取得処理が完了しませんでした。" });
+      await createBlogZip(job.outputDirectory, result.saved.map(({ directory }) => directory));
+      await this.store.update(job.id, {
+        status: "succeeded", savedCount: result.saved.length, outputBytes: result.totalBytes,
+        blogZipReady: true, log: log.slice(-80),
+      });
     } catch (error) {
       await this.store.update(job.id, {
         status: "failed",
