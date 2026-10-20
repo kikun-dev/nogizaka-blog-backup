@@ -12,7 +12,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (denied) return denied;
   const { id } = await context.params;
   const job = await localJobStore.get(id);
-  if (job?.kind !== "blog" || job.status !== "succeeded" || !job.blogZipReady) {
+  if (job?.kind !== "blog" || !["succeeded", "partial"].includes(job.status) || !job.blogZipReady) {
     return Response.json({ error: "ZIPが見つかりません。" }, { status: 404 });
   }
   try {

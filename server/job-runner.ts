@@ -1,6 +1,6 @@
 import type { BlogArticle, BlogAuthor } from "@/lib/catalog/types";
-import type { BulkCursor } from "@/lib/selection";
-import { localJobStore, type JobStore, type LocalJob } from "./job-store";
+import { SelectionError, type BulkCursor } from "@/lib/selection";
+import { localJobStore, type ArticleResult, type JobStore, type LocalJob } from "./job-store";
 
 export interface JobRunner {
   initialize(): Promise<void>;
@@ -10,6 +10,7 @@ export interface JobRunner {
   submitFullBackup(author: BlogAuthor, firstUrl: string, cursor?: BulkCursor, priorPartIds?: string[]): Promise<LocalJob | null>;
   continueFullBackup(id: string): Promise<LocalJob | null>;
   resumeFullBackup(id: string): Promise<LocalJob | null>;
+  retryFailed(id: string): Promise<LocalJob | null>;
 }
 
 const MAX_RUNNING = 1;
@@ -24,6 +25,12 @@ type FullBackupServices = {
   collectBulkBatch: typeof import("@/lib/selection").collectBulkBatch;
   getArticlePage: typeof import("./catalog").getArticlePage;
 };
+type JobServices = {
+  archiveWebArticles: typeof import("./archive-engine").archiveWebArticles;
+  createBlogZip: typeof import("./blog-zip").createBlogZip;
+  acquirePhotos: typeof import("./photo-acquisition").acquirePhotos;
+  createPhotoZip: typeof import("./photo-zip").createPhotoZip;
+};
 
 export class LocalJobRunner implements JobRunner {
   private initialization: Promise<void> | null = null;
@@ -32,11 +39,14 @@ export class LocalJobRunner implements JobRunner {
   private waiting: LocalJob[] = [];
   private resuming = new Set<string>();
   private continuations = new Map<string, Promise<LocalJob | null>>();
+  private retries = new Map<string, Promise<LocalJob | null>>();
+  private submissions = new Map<string, Promise<LocalJob | null>>();
+  private activeKeys = new Map<string, string>();
 
   constructor(
     private readonly store: JobStore,
     private readonly execute: (job: LocalJob) => Promise<void> = (job) => this.run(job),
-    private readonly backupOptions?: { services?: FullBackupServices; articleLimit?: number; byteLimit?: number },
+    private readonly backupOptions?: { services?: FullBackupServices; jobServices?: JobServices; articleLimit?: number; byteLimit?: number },
   ) {}
 
   async initialize() {
@@ -109,12 +119,51 @@ export class LocalJobRunner implements JobRunner {
     }
   }
 
-  private async enqueue(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase" | "priorPartIds">): Promise<LocalJob | null> {
+  async retryFailed(id: string): Promise<LocalJob | null> {
+    const pending = this.retries.get(id);
+    if (pending) return pending;
+    const promise = this.createRetry(id);
+    this.retries.set(id, promise);
+    try { return await promise; }
+    finally { this.retries.delete(id); }
+  }
+
+  private async createRetry(id: string): Promise<LocalJob | null> {
     await this.initialize();
+    const previous = await this.store.get(id);
+    if (!previous || previous.fullBackup || !["partial", "failed"].includes(previous.status)) return null;
+    if (previous.retriedByJobId) return this.store.get(previous.retriedByJobId);
+    const failed = new Set(previous.articleResults?.filter((article) => article.status === "failed").map((article) => article.id));
+    const articles = previous.requestedArticles?.filter((article) => failed.has(article.id));
+    if (articles && !articles.length) return null;
+    const retry = await this.enqueue(articles?.[0]?.url ?? previous.articleUrl, {
+      kind: previous.kind, requestedArticles: articles, requestedAuthor: previous.requestedAuthor,
+      retryOfJobId: id,
+    });
+    if (retry) await this.store.update(id, { retriedByJobId: retry.id });
+    return retry;
+  }
+
+  private async enqueue(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase" | "priorPartIds" | "retryOfJobId">): Promise<LocalJob | null> {
+    const key = JSON.stringify([options?.kind, options?.requestedArticles?.map((article) => article.id) ?? articleUrl,
+      options?.fullBackup, options?.nextCursor, options?.priorPartIds, options?.retryOfJobId]);
+    const pending = this.submissions.get(key);
+    if (pending) return pending;
+    const promise = this.createQueuedJob(articleUrl, options, key);
+    this.submissions.set(key, promise);
+    try { return await promise; }
+    finally { this.submissions.delete(key); }
+  }
+
+  private async createQueuedJob(articleUrl: string, options: Parameters<JobStore["create"]>[1], key: string): Promise<LocalJob | null> {
+    await this.initialize();
+    const activeId = this.activeKeys.get(key);
+    if (activeId) return this.store.get(activeId);
     if (this.running + this.waiting.length + this.reserved >= MAX_RUNNING + MAX_WAITING) return null;
     this.reserved++;
     try {
       const job = await this.store.create(articleUrl, options);
+      this.activeKeys.set(key, job.id);
       this.waiting.push(job);
       return job;
     } finally {
@@ -128,6 +177,7 @@ export class LocalJobRunner implements JobRunner {
       const job = this.waiting.shift()!;
       this.running++;
       void this.execute(job).finally(() => {
+        for (const [key, id] of this.activeKeys) if (id === job.id) this.activeKeys.delete(key);
         this.running--;
         this.pump();
       });
@@ -137,50 +187,84 @@ export class LocalJobRunner implements JobRunner {
   private async run(job: LocalJob) {
     try {
       await this.store.update(job.id, { status: "running", error: undefined });
-      if (job.kind === "photos") {
-        const [{ acquirePhotos }, { createPhotoZip }] = await Promise.all([
-          import("./photo-acquisition"), import("./photo-zip"),
-        ]);
-        const photoArticles = await acquirePhotos(job.requestedArticles ?? [], job.outputDirectory);
-        let photoZipReady = false;
-        try { photoZipReady = await createPhotoZip(job.outputDirectory, photoArticles); }
-        catch (error) { console.error("Failed to create photo ZIP", error); }
-        const hasUsableArticle = photoArticles.some((article) => !article.error && (article.detected === 0 || article.photos.length > 0));
-        await this.store.update(job.id, {
-          photoArticles,
-          photoZipReady,
-          status: hasUsableArticle ? "succeeded" : "failed",
-          ...(!hasUsableArticle ? { error: "写真を取得できませんでした。各ブログの結果を確認してください。" } : {}),
-        });
-        return;
-      }
       if (job.fullBackup) {
         await this.runFullBackup(job);
         return;
       }
-      const [{ archiveWebArticles }, { createBlogZip }] = await Promise.all([
-        import("./archive-engine"), import("./blog-zip"),
-      ]);
+      const services = this.backupOptions?.jobServices ?? await (async (): Promise<JobServices> => {
+        const [archive, blogZip, photos, photoZip] = await Promise.all([
+          import("./archive-engine"), import("./blog-zip"), import("./photo-acquisition"), import("./photo-zip"),
+        ]);
+        return { archiveWebArticles: archive.archiveWebArticles, createBlogZip: blogZip.createBlogZip,
+          acquirePhotos: photos.acquirePhotos, createPhotoZip: photoZip.createPhotoZip };
+      })();
+      if (job.kind === "photos") {
+        const { acquirePhotos, createPhotoZip } = services;
+        const photoArticles = await acquirePhotos(job.requestedArticles ?? [], job.outputDirectory, async (results, current) => {
+          const articleResults: ArticleResult[] = results.map((article) => ({
+            id: article.id, title: article.title, date: article.date,
+            status: article.error || article.failed > 0 ? "failed" : "succeeded",
+            ...(article.error || article.failed > 0 ? { message: "写真の一部または全部を取得できませんでした。" } : {}),
+          }));
+          await this.store.update(job.id, { photoArticles: results, articleResults,
+            savedCount: articleResults.filter((article) => article.status === "succeeded").length,
+            currentArticle: current ? { title: current.title, date: current.date } : undefined });
+        });
+        let photoZipReady = false;
+        try { photoZipReady = await createPhotoZip(job.outputDirectory, photoArticles); }
+        catch (error) { console.error("Failed to create photo ZIP", error); }
+        const successCount = photoArticles.filter((article) => !article.error && article.failed === 0).length;
+        const failureCount = photoArticles.length - successCount;
+        await this.store.update(job.id, {
+          photoArticles,
+          photoZipReady,
+          savedCount: successCount,
+          currentArticle: undefined,
+          status: failureCount ? successCount || photoArticles.some((article) => article.photos.length > 0) ? "partial" : "failed" : "succeeded",
+          ...(failureCount === photoArticles.length ? { error: "写真を取得できませんでした。各ブログの結果を確認してください。" } : {}),
+        });
+        return;
+      }
+      const { archiveWebArticles, createBlogZip } = services;
       const log: string[] = [];
+      const articleResults: ArticleResult[] = [];
       const result = await archiveWebArticles({
         articles: job.requestedArticles ?? [{ url: job.articleUrl }],
         output: job.outputDirectory,
         author: job.requestedAuthor,
       }, {
         logger: { log: (line: string) => { log.push(line); }, warn: (line: string) => { log.push(line); } },
-        onProgress: async (count: number, bytes: number) => {
-          await this.store.update(job.id, { savedCount: count, outputBytes: bytes, log: log.slice(-80) });
+        continueOnError: true,
+        onStart: async (article) => {
+          await this.store.update(job.id, { currentArticle: { title: article.title ?? "ブログ", date: article.date ?? "" } });
+        },
+        onFailure: async (article, error) => {
+          console.error("Failed to save blog article", { jobId: job.id, articleId: article.id, error });
+          articleResults.push({ id: article.id ?? article.url, title: article.title ?? "ブログ", date: article.date ?? "",
+            status: "failed", message: "このブログを保存できませんでした。" });
+          await this.store.update(job.id, { articleResults: [...articleResults], currentArticle: undefined, log: log.slice(-80) });
+        },
+        onProgress: async (count: number, bytes: number, saved) => {
+          articleResults.push({ id: saved.metadata.id, title: saved.metadata.title, date: saved.metadata.date, status: "succeeded" });
+          await this.store.update(job.id, { savedCount: count, outputBytes: bytes, articleResults: [...articleResults],
+            currentArticle: undefined, log: log.slice(-80) });
         },
       });
-      await createBlogZip(job.outputDirectory, result.saved.map(({ directory }) => directory));
+      if (result.saved.length) await createBlogZip(job.outputDirectory, result.saved.map(({ directory }) => directory));
       await this.store.update(job.id, {
-        status: "succeeded", savedCount: result.saved.length, outputBytes: result.totalBytes,
-        blogZipReady: true, log: log.slice(-80), error: undefined,
+        status: articleResults.some((article) => article.status === "failed")
+          ? result.saved.length ? "partial" : "failed" : "succeeded",
+        savedCount: result.saved.length, outputBytes: result.totalBytes,
+        blogZipReady: result.saved.length > 0, currentArticle: undefined,
+        articleResults, log: log.slice(-80),
+        ...(result.saved.length ? { error: undefined } : { error: "ブログを保存できませんでした。失敗した記事を再試行できます。" }),
       });
     } catch (error) {
+      console.error("Job failed", { jobId: job.id, error });
       await this.store.update(job.id, {
         status: "failed",
-        error: error instanceof Error ? error.message : "予期しないエラーが発生しました。",
+        currentArticle: undefined,
+        error: error instanceof SelectionError ? error.message : "処理を完了できませんでした。しばらくしてから再試行してください。",
       }).catch(() => {});
     }
   }
@@ -252,12 +336,16 @@ export class LocalJobRunner implements JobRunner {
             cacheResults: false,
           }, {
             logger,
+            onStart: async (article) => {
+              job = await this.store.update(job.id, { currentArticle: { title: article.title ?? "ブログ", date: article.date ?? "" } });
+            },
             onProgress: async (_count: number, bytes: number, saved: { directory: string; metadata: { id: string } }) => {
               job = await this.store.update(job.id, {
                 savedCount: (job.savedCount ?? 0) + 1,
                 outputBytes: (job.outputBytes ?? 0) + bytes - previousBytes,
                 savedDirectories: [...(job.savedDirectories ?? []), saved.directory],
                 processedArticleIds: [...(job.processedArticleIds ?? []), saved.metadata.id],
+                currentArticle: undefined,
                 log: [...log],
               });
               processed.add(saved.metadata.id);
@@ -285,7 +373,7 @@ export class LocalJobRunner implements JobRunner {
     logger.log(`取得した${job.savedCount}件を1つのZIPにまとめています。`);
     job = await this.store.update(job.id, { backupPhase: "packaging", log: [...log] });
     await createStreamingBlogZip(job.outputDirectory, job.savedDirectories ?? []);
-    await this.store.update(job.id, { status: "succeeded", blogZipReady: true, log: [...log], error: undefined });
+    await this.store.update(job.id, { status: "succeeded", blogZipReady: true, currentArticle: undefined, log: [...log], error: undefined });
   }
 }
 

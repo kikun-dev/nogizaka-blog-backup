@@ -8,6 +8,7 @@ import { test } from "node:test";
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "./job-store") return nextResolve("./job-store.ts", context);
+    if (specifier === "@/lib/selection") return nextResolve("../lib/selection.ts", context);
     return nextResolve(specifier, context);
   },
 });
@@ -54,7 +55,7 @@ test("runner executes one job and bounds its waiting queue", async () => {
     started.push(job.id);
     await new Promise((resolve) => releases.push(resolve));
   });
-  const accepted = await Promise.all(Array.from({ length: 11 }, () => runner.submit("https://example.com")));
+  const accepted = await Promise.all(Array.from({ length: 11 }, (_, index) => runner.submit(`https://example.com/${index}`)));
   assert.equal(accepted.filter(Boolean).length, 11);
   assert.equal(started.length, 1);
   assert.equal(await runner.submit("https://example.com"), null);
@@ -224,4 +225,128 @@ test("a deleted cursor article is recovered across ZIP parts without duplicates"
   assert.equal(finished.status, "succeeded");
   assert.equal(finished.savedCount, 1);
   assert.deepEqual(zipContents.get(finished.outputDirectory), ["dir/3"]);
+});
+
+test("partial blog job keeps successful ZIP, retries only failures, and deduplicates starts", async () => {
+  const jobs = new Map();
+  let nextId = 0;
+  const archived = [];
+  const zipped = [];
+  const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
+  const articles = ["1", "2", "3"].map((id) => ({ id, url: `https://example.com/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
+  const store = {
+    async failInterrupted() {},
+    async create(articleUrl, options) {
+      const job = { id: `job-${++nextId}`, articleUrl, ...options, status: "queued", outputDirectory: `job-${nextId}`, log: [] };
+      jobs.set(job.id, job);
+      return { ...job };
+    },
+    async get(id) { return jobs.has(id) ? { ...jobs.get(id) } : null; },
+    async update(id, change) {
+      const job = { ...jobs.get(id), ...change };
+      jobs.set(id, job);
+      return { ...job };
+    },
+  };
+  const jobServices = {
+    async archiveWebArticles({ articles: batch }, { onStart, onFailure, onProgress, continueOnError }) {
+      assert.equal(continueOnError, true);
+      archived.push(batch.map(({ id }) => id));
+      const saved = [];
+      for (const [index, article] of batch.entries()) {
+        await onStart(article, index);
+        if (article.id === "2" && archived.length === 1) {
+          await onFailure(article, new Error("private stack detail"));
+          continue;
+        }
+        const record = { directory: `dir/${article.id}`, metadata: article };
+        saved.push(record);
+        await onProgress(saved.length, saved.length * 10, record);
+      }
+      return { saved, totalBytes: saved.length * 10 };
+    },
+    async createBlogZip(_directory, directories) { zipped.push(directories); },
+    async acquirePhotos() { throw new Error("unexpected photos"); },
+    async createPhotoZip() { throw new Error("unexpected photos ZIP"); },
+  };
+  const runner = new LocalJobRunner(store, undefined, { jobServices });
+  const [first, duplicate] = await Promise.all([
+    runner.submitBlogs(articles, author), runner.submitBlogs(articles, author),
+  ]);
+  assert.equal(duplicate.id, first.id);
+  async function completed(id) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const job = await store.get(id);
+      if (["succeeded", "partial", "failed"].includes(job.status)) return job;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error("job did not finish");
+  }
+  const partial = await completed(first.id);
+  assert.equal(partial.status, "partial");
+  assert.equal(partial.savedCount, 2);
+  assert.deepEqual(partial.articleResults.map(({ status }) => status), ["succeeded", "failed", "succeeded"]);
+  assert.doesNotMatch(JSON.stringify(partial), /private stack detail/);
+  assert.deepEqual(zipped[0], ["dir/1", "dir/3"]);
+  const [retry, duplicateRetry] = await Promise.all([runner.retryFailed(first.id), runner.retryFailed(first.id)]);
+  assert.equal(duplicateRetry.id, retry.id);
+  const recovered = await completed(retry.id);
+  assert.equal(recovered.status, "succeeded");
+  assert.deepEqual(archived, [["1", "2", "3"], ["2"]]);
+  assert.deepEqual(zipped[1], ["dir/2"]);
+});
+
+test("photo job treats zero images as success and retries an article with failed images", async () => {
+  const jobs = new Map();
+  let nextId = 0;
+  const calls = [];
+  const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
+  const articles = ["1", "2"].map((id) => ({ id, url: `https://example.com/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
+  const store = {
+    async failInterrupted() {},
+    async create(articleUrl, options) {
+      const job = { id: `photo-${++nextId}`, articleUrl, ...options, status: "queued", outputDirectory: `photo-${nextId}`, log: [] };
+      jobs.set(job.id, job);
+      return { ...job };
+    },
+    async get(id) { return jobs.has(id) ? { ...jobs.get(id) } : null; },
+    async update(id, change) {
+      const job = { ...jobs.get(id), ...change };
+      jobs.set(id, job);
+      return { ...job };
+    },
+  };
+  const jobServices = {
+    async acquirePhotos(batch, _output, onProgress) {
+      calls.push(batch.map(({ id }) => id));
+      const results = [];
+      for (const article of batch) {
+        await onProgress([...results], article);
+        results.push({ id: article.id, title: article.title, date: article.date, authorName: author.name,
+          photos: article.id === "2" ? [{ name: "1.jpg", mimeType: "image/jpeg" }] : [],
+          detected: article.id === "2" ? 2 : 0, failed: article.id === "2" && calls.length === 1 ? 1 : 0 });
+        await onProgress([...results]);
+      }
+      return results;
+    },
+    async createPhotoZip() { return true; },
+    async archiveWebArticles() { throw new Error("unexpected blogs"); },
+    async createBlogZip() { throw new Error("unexpected blog ZIP"); },
+  };
+  const runner = new LocalJobRunner(store, undefined, { jobServices });
+  const first = await runner.submitPhotos(articles);
+  async function completed(id) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const job = await store.get(id);
+      if (["succeeded", "partial", "failed"].includes(job.status)) return job;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error("job did not finish");
+  }
+  const partial = await completed(first.id);
+  assert.equal(partial.status, "partial");
+  assert.deepEqual(partial.articleResults.map(({ status }) => status), ["succeeded", "failed"]);
+  const retry = await runner.retryFailed(first.id);
+  assert.equal((await completed(retry.id)).status, "succeeded");
+  assert.deepEqual(calls, [["1", "2"], ["2"]]);
 });
