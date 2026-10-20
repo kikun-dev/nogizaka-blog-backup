@@ -9,6 +9,7 @@ import { assertSameAuthor, markArticleVisited } from "../lib/archive/identity.mj
 import { sameAuthor } from "../lib/archive/paths.mjs";
 import { openArticle } from "../lib/archive/source.mjs";
 import { normalizeArticleUrl } from "../lib/archive/urls.mjs";
+import { ArchiveOutputLimitError, enforceArchiveOutputLimit } from "../lib/archive/output-limit.mjs";
 import { saveMhtml, savePdf } from "../lib/archive/formats.mjs";
 
 test("URL normalization keeps a non-member cd and rejects foreign origins", () => {
@@ -120,6 +121,28 @@ test("overlapping format saves use separate temporary files", async () => {
     ]);
     assert.ok(["first", "second"].includes(await readFile(mhtmlDestination, "utf8")));
     assert.deepEqual((await readdir(root)).sort(), ["blog.mhtml", "blog.pdf"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("output limit removes only the unaccepted blog directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sakamichi-limit-"));
+  try {
+    const accepted = path.join(root, "accepted");
+    const unaccepted = path.join(root, "unaccepted");
+    await mkdir(accepted);
+    await mkdir(unaccepted);
+    await writeFile(path.join(accepted, "blog.pdf"), "saved");
+    for (const name of ["blog.mhtml", "blog.pdf", "metadata.json"]) {
+      await writeFile(path.join(unaccepted, name), "oversized");
+    }
+
+    await enforceArchiveOutputLimit(19, 19, unaccepted);
+    assert.equal((await readdir(unaccepted)).length, 3);
+    await assert.rejects(enforceArchiveOutputLimit(20, 19, unaccepted), ArchiveOutputLimitError);
+    await assert.rejects(readdir(unaccepted), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(accepted, "blog.pdf"), "utf8"), "saved");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
