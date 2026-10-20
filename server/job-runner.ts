@@ -35,6 +35,7 @@ type JobServices = {
 
 export class LocalJobRunner implements JobRunner {
   private initialization: Promise<void> | null = null;
+  private pendingInitializations = 0;
   private running = 0;
   private reserved = 0;
   private waiting: LocalJob[] = [];
@@ -51,13 +52,18 @@ export class LocalJobRunner implements JobRunner {
   ) {}
 
   async initialize() {
-    if (!this.initialization) {
-      this.initialization = this.store.failInterrupted().catch((error: unknown) => {
-        this.initialization = null;
-        throw error;
-      });
+    this.pendingInitializations++;
+    try {
+      if (!this.initialization) {
+        this.initialization = this.store.failInterrupted().catch((error: unknown) => {
+          this.initialization = null;
+          throw error;
+        });
+      }
+      await this.initialization;
+    } finally {
+      this.pendingInitializations--;
     }
-    await this.initialization;
   }
 
   async submit(articleUrl: string): Promise<LocalJob | null> {
@@ -103,11 +109,11 @@ export class LocalJobRunner implements JobRunner {
   }
 
   async resumeFullBackup(id: string): Promise<LocalJob | null> {
-    await this.initialize();
     if (this.resuming.has(id) || this.running + this.waiting.length + this.reserved >= MAX_RUNNING + MAX_WAITING) return null;
     this.resuming.add(id);
     this.reserved++;
     try {
+      await this.initialize();
       const job = await this.store.get(id);
       if (!job?.fullBackup || job.status !== "failed") return null;
       const resumed = await this.store.update(id, { status: "queued", error: undefined });
@@ -385,7 +391,7 @@ export class LocalJobRunner implements JobRunner {
 
 // Keep active work across development module reloads. An old implementation is
 // replaced only after its running and queued work has finished.
-const RUNNER_VERSION = 3;
+const RUNNER_VERSION = 4;
 const runnerGlobal = globalThis as typeof globalThis & {
   sakamichiLocalJobRunner?: JobRunner;
   sakamichiLocalJobRunnerVersion?: number;
@@ -396,6 +402,8 @@ const runnerGlobal = globalThis as typeof globalThis & {
 function hasUnfinishedWork(runner: JobRunner): boolean {
   // Older hot-reloaded class instances do not have a public activity method.
   const local = runner as JobRunner & Partial<{
+    initialization: Promise<void> | null;
+    pendingInitializations: number;
     running: number;
     reserved: number;
     waiting: LocalJob[];
@@ -405,7 +413,10 @@ function hasUnfinishedWork(runner: JobRunner): boolean {
     retries: Map<string, Promise<LocalJob | null>>;
     submissions: Map<string, Promise<LocalJob | null>>;
   }>;
-  return (local.running ?? 0) > 0 || (local.reserved ?? 0) > 0
+  // A pre-v4 runner cannot reveal whether an initialization waiter will enqueue
+  // work after the promise settles. Keep it until the process restarts.
+  if (local.pendingInitializations === undefined && local.initialization) return true;
+  return (local.pendingInitializations ?? 0) > 0 || (local.running ?? 0) > 0 || (local.reserved ?? 0) > 0
     || (local.waiting?.length ?? 0) > 0 || (local.activeKeys?.size ?? 0) > 0
     || (local.resuming?.size ?? 0) > 0 || (local.continuations?.size ?? 0) > 0
     || (local.retries?.size ?? 0) > 0 || (local.submissions?.size ?? 0) > 0;

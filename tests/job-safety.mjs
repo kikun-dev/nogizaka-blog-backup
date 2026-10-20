@@ -32,7 +32,7 @@ test("module reload replaces a runner from an older implementation", async () =>
     globalThis.sakamichiLocalJobRunnerVersion = 1;
     const upgraded = (await import("../server/job-runner.ts?upgrade-test")).localJobRunner;
     assert.notEqual(upgraded, globalRunner);
-    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 3);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 4);
     assert.equal(typeof upgraded.submitPhotos, "function");
   } finally {
     globalThis.sakamichiLocalJobRunner = globalRunner;
@@ -60,7 +60,62 @@ test("module reload keeps a busy old runner until its work finishes", async () =
     busy.running = 0;
     globalThis.selectSakamichiRunner();
     assert.notEqual(globalThis.sakamichiLocalJobRunner, busy);
-    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 3);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 4);
+  } finally {
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+    globalThis.selectSakamichiRunner = globalSelector;
+  }
+});
+
+test("reload during initialization cannot replace a runner that may still enqueue work", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  const globalSelector = globalThis.selectSakamichiRunner;
+  let releaseInitialization;
+  const initialization = new Promise((resolve) => { releaseInitialization = resolve; });
+  const job = { id: "backup-during-init", fullBackup: true, status: "failed", articleUrl: "https://example.com" };
+  const store = {
+    async failInterrupted() { await initialization; },
+    async get() { return { ...job }; },
+    async update(_id, change) { Object.assign(job, change); return { ...job }; },
+  };
+  const runner = new LocalJobRunner(store, async () => {});
+  try {
+    globalThis.sakamichiLocalJobRunner = runner;
+    globalThis.sakamichiLocalJobRunnerVersion = 3;
+    const resuming = runner.resumeFullBackup(job.id);
+    assert.equal(runner.pendingInitializations, 1);
+    assert.equal(runner.resuming.has(job.id), true);
+    await import("../server/job-runner.ts?initialization-race-test");
+    assert.equal(globalThis.sakamichiLocalJobRunner, runner);
+    releaseInitialization();
+    assert.equal((await resuming).status, "queued");
+    await new Promise((resolve) => setImmediate(resolve));
+    globalThis.selectSakamichiRunner();
+    assert.notEqual(globalThis.sakamichiLocalJobRunner, runner);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 4);
+  } finally {
+    releaseInitialization();
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+    globalThis.selectSakamichiRunner = globalSelector;
+  }
+});
+
+test("an initialized legacy runner is kept when pending callers cannot be inspected", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  const globalSelector = globalThis.selectSakamichiRunner;
+  const legacy = { initialization: Promise.resolve(), running: 0, waiting: [], activeKeys: new Map() };
+  try {
+    globalThis.sakamichiLocalJobRunner = legacy;
+    globalThis.sakamichiLocalJobRunnerVersion = 3;
+    await import("../server/job-runner.ts?legacy-initialization-test");
+    assert.equal(globalThis.sakamichiLocalJobRunner, legacy);
+    await legacy.initialization;
+    globalThis.selectSakamichiRunner();
+    assert.equal(globalThis.sakamichiLocalJobRunner, legacy);
   } finally {
     globalThis.sakamichiLocalJobRunner = globalRunner;
     globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
