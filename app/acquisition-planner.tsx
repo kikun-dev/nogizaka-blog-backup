@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
 import { paginateArticles, type ArticleCursor, type ListedArticle, type SelectionArticlePage } from "@/lib/selection-pages";
-import { SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest } from "@/lib/selection";
+import { ALL_AUTHORS_ID, SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest } from "@/lib/selection";
 
 type Stage = "conditions" | "articles";
 
 const contentName = { photos: "写真のみ", blog: "ブログ" } as const;
+const groupName = { nogizaka: "乃木坂46", sakurazaka: "櫻坂46", hinatazaka: "日向坂46" } as const;
 const rangeName = {
   "latest-one": "最新1件",
   "latest-n": "最新N件",
@@ -45,6 +46,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   const memberAuthors = authors.filter((author) => author.type === "member");
   const otherAuthors = authors.filter((author) => author.type !== "member");
   const sourceCursor = pageSources[pageNumber - 1];
+  const groupWide = authorId === ALL_AUTHORS_ID;
 
   function invalidateConfirmation() {
     confirmationVersion.current += 1;
@@ -136,6 +138,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   function changeAuthor(value: string) {
     invalidateConfirmation();
     setAuthorId(value);
+    if (value === ALL_AUTHORS_ID && range === "all") setRange("latest-one");
     setSelected({});
     setArticlePage(null);
     setPageNumber(1);
@@ -256,7 +259,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
       {stage === "articles" ? (
         <div className="article-screen">
           <button type="button" className="text-button" onClick={() => { invalidateConfirmation(); setStage("conditions"); setMessage(""); }}>条件の設定に戻る</button>
-          <h4>{authors.find((author) => author.id === authorId)?.name}のブログを選ぶ</h4>
+          <h4>{groupWide ? `${groupName[group]}全体` : authors.find((author) => author.id === authorId)?.name}のブログを選ぶ</h4>
           <p className="field-help">新しい順に表示します。ページを移動しても選択は残ります。</p>
           {loadingArticles && <p role="status" className="field-help">ブログを読み込んでいます…</p>}
           {articlePage && (
@@ -272,7 +275,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
                   {articlePage.items.map((item) => <li key={item.article.id}>
                     <label className="selection-article-row">
                       <input type="checkbox" checked={Boolean(selected[item.article.id])} onChange={() => toggleArticle(item)} disabled={!selected[item.article.id] && selectedCount >= limit} />
-                      <span><strong>{item.article.title}</strong>{item.article.excerpt && <small>{item.article.excerpt}</small>}<time>{item.article.date || "日付なし"}</time></span>
+                      <span><strong>{item.article.title}</strong>{groupWide && <small>{item.article.author.name}</small>}{item.article.excerpt && <small>{item.article.excerpt}</small>}<time>{item.article.date || "日付なし"}</time></span>
                     </label>
                   </li>)}
                 </ul>
@@ -304,6 +307,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             <label htmlFor="selection-author">メンバー</label>
             <select id="selection-author" value={authorId} onChange={(event) => changeAuthor(event.target.value)} disabled={loadingAuthors || authors.length === 0}>
               <option value="">{loadingAuthors ? "読み込み中…" : "選択してください"}</option>
+              {authors.length > 0 && <option value={ALL_AUTHORS_ID}>全件（{groupName[group]}全体の最新ブログ）</option>}
               {memberAuthors.length > 0 && <optgroup label="メンバー">{memberAuthors.map((author) => <option key={author.id} value={author.id}>{author.name}</option>)}</optgroup>}
               {otherAuthors.length > 0 && <optgroup label="その他のブログ">{otherAuthors.map((author) => <option key={author.id} value={author.id}>{author.name}</option>)}</optgroup>}
             </select>
@@ -321,7 +325,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">ブログの件数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>ブログを選ぶ</strong><small>ページを跨いで{limit}件まで</small></span></label>
             {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorId} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
-            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog"} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
+            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog" || groupWide} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{groupWide ? "グループ全体では選べません" : content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
             {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
               <strong>全件バックアップについて</strong>
               <p>公式一覧の最後まで自動で取得し、通常は完了後に1つのZIPにまとめます。内部では10件ずつ処理するため、件数に応じて長時間かかります。処理中、ほかの保存ジョブは待機します。</p>
@@ -334,7 +338,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
           {plan && (
             <div className="selection-summary" role="status">
               <strong>取得条件を確認しました</strong>
-              <p>{plan.author.name}・{contentName[plan.content]}・{rangeName[plan.range]}{plan.range === "latest-n" ? `（${plan.count}件）` : plan.range === "selected" ? `（${plan.articles?.length}件）` : ""}</p>
+              <p>{plan.authorId === ALL_AUTHORS_ID ? `${groupName[plan.group]}全体` : plan.author.name}・{contentName[plan.content]}・{rangeName[plan.range]}{plan.range === "latest-n" ? `（${plan.count}件）` : plan.range === "selected" ? `（${plan.articles?.length}件）` : ""}</p>
               {plan.range === "latest-n" && plan.previewArticles && plan.previewArticles.length < (plan.count ?? 0) &&
                 <p className="field-help">公式一覧で確認できたブログは{plan.previewArticles.length}件です。</p>}
               {plan.previewArticles && plan.previewArticles.length > 0 && (
@@ -342,6 +346,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
                   <h4>対象のブログ</h4>
                   <ul>{plan.previewArticles.map((article) => <li key={article.id}>
                     <strong>{article.title}</strong>
+                    {plan.authorId === ALL_AUTHORS_ID && <small>{article.author.name}</small>}
                     <time>更新日時: {article.date || "日時不明"}</time>
                   </li>)}</ul>
                 </div>

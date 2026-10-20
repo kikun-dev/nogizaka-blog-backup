@@ -2,7 +2,7 @@ import type { Page } from "playwright";
 import type { BlogArticle, BlogArticlePage, BlogAuthor, BlogGroup, BlogAuthorType } from "@/lib/catalog/types";
 
 type RawAuthor = { id: string; name: string };
-type RawArticle = { id: string; title: string; date: string; url: string; excerpt?: string };
+type RawArticle = { id: string; title: string; date: string; url: string; excerpt?: string; authorName?: string };
 type SiteAdapter = {
   origin: string;
   authorPath: string;
@@ -10,6 +10,8 @@ type SiteAdapter = {
   readAuthors: (page: Page) => Promise<RawAuthor[]>;
   readArticles: (page: Page) => Promise<{ items: RawArticle[]; hasNext: boolean }>;
 };
+
+export class ArticleAuthorError extends Error {}
 
 const clean = (value: string) => value.replace(/\s+/g, " ").trim();
 // The official Sakurazaka selector still links to ct=06, but that URL now redirects to Not Found.
@@ -56,6 +58,7 @@ const adapters: Record<BlogGroup, SiteAdapter> = {
           title: link.querySelector(".date-title .title")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
           excerpt: link.querySelector(".lead")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
           date: link.querySelector(".date-title .date")?.textContent?.trim() ?? "",
+          authorName: link.querySelector(".prof .name")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
           url: link.href,
         })),
       hasNext: Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href*='page=']"))
@@ -81,6 +84,7 @@ const adapters: Record<BlogGroup, SiteAdapter> = {
             id: link ? new URL(link.href).pathname.match(/\/detail\/(\d+)/)?.[1] ?? "" : "",
             title: card.querySelector(".c-blog-article__title")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
             date: card.querySelector(".c-blog-article__date")?.textContent?.trim() ?? "",
+            authorName: card.querySelector(".c-blog-article__name")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
             url: link?.href ?? "",
           };
         }),
@@ -113,6 +117,13 @@ export function authorListUrl(group: BlogGroup, id: string): string {
   return url.href;
 }
 
+export function groupArticlesUrl(group: BlogGroup, page: number): string {
+  const adapter = adapters[group];
+  const url = new URL(adapter.listPath, adapter.origin);
+  if (page > 1) url.searchParams.set("page", String(page - 1));
+  return url.href;
+}
+
 export function authorsUrl(group: BlogGroup): string {
   const adapter = adapters[group];
   return new URL(adapter.authorPath, adapter.origin).href;
@@ -142,14 +153,7 @@ export async function readAuthors(group: BlogGroup, page: Page): Promise<BlogAut
 
 export async function readArticles(group: BlogGroup, author: BlogAuthor, page: Page, pageNumber: number): Promise<BlogArticlePage> {
   const raw = await adapters[group].readArticles(page);
-  const origin = adapters[group].origin;
-  const items: BlogArticle[] = raw.items.filter(({ id, url }) => {
-    if (!/^\d+$/.test(id)) return false;
-    try {
-      const parsed = new URL(url);
-      return parsed.origin === origin && /\/diary\/detail\/\d+$/.test(parsed.pathname);
-    } catch { return false; }
-  }).map(({ id, title, date, url, excerpt }) => ({
+  const items: BlogArticle[] = raw.items.filter((item) => isValidArticle(group, item)).map(({ id, title, date, url, excerpt }) => ({
     id,
     title: clean(title) || "無題のブログ",
     ...(excerpt && !clean(title) ? { excerpt: clean(excerpt) } : {}),
@@ -157,5 +161,69 @@ export async function readArticles(group: BlogGroup, author: BlogAuthor, page: P
     url,
     author,
   }));
+  return { items, page: pageNumber, hasNext: raw.hasNext };
+}
+
+function isValidArticle(group: BlogGroup, { id, url }: RawArticle): boolean {
+  const origin = adapters[group].origin;
+  if (!/^\d+$/.test(id)) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === origin && /\/diary\/detail\/\d+$/.test(parsed.pathname);
+  } catch { return false; }
+}
+
+async function nogizakaAuthorId(page: Page, url: string): Promise<string> {
+  const response = await page.request.get(url, { timeout: 30_000 });
+  if (!response.ok() || new URL(response.url()).origin !== adapters.nogizaka.origin
+    || new URL(response.url()).pathname !== new URL(url).pathname) {
+    throw new ArticleAuthorError("乃木坂46のブログ投稿者を確認できませんでした。時間をおいて一覧を再読み込みしてください。");
+  }
+  const html = await response.text();
+  if (html.length > 2_000_000) throw new ArticleAuthorError("乃木坂46のブログ投稿者を確認できませんでした。時間をおいて一覧を再読み込みしてください。");
+  return parseNogizakaAuthorId(html, response.url());
+}
+
+export function parseNogizakaAuthorId(html: string, baseUrl: string): string {
+  const profile = [...html.matchAll(/<a\b[^>]*>/gi)].map(([tag]) => tag)
+    .find((tag) => /\bbd--prof__tex__a\b/.test(tag));
+  const href = profile?.match(/\bhref=["']([^"']+)["']/i)?.[1];
+  const authorUrl = href ? new URL(href, baseUrl) : null;
+  const authorId = authorUrl?.origin === adapters.nogizaka.origin
+    && authorUrl.pathname === adapters.nogizaka.listPath ? authorUrl.searchParams.get("ct") : null;
+  if (!authorId || !isAuthorId(authorId)) throw new ArticleAuthorError("乃木坂46のブログ投稿者を確認できませんでした。時間をおいて一覧を再読み込みしてください。");
+  return authorId;
+}
+
+export async function readGroupArticles(group: BlogGroup, authors: BlogAuthor[], page: Page, pageNumber: number): Promise<BlogArticlePage> {
+  const raw = await adapters[group].readArticles(page);
+  const valid = raw.items.filter((item) => isValidArticle(group, item));
+  if (valid.length !== raw.items.length) {
+    throw new ArticleAuthorError("公式ブログの記事を確認できませんでした。時間をおいて一覧を再読み込みしてください。");
+  }
+  const byId = new Map(authors.map((author) => [author.id, author]));
+  const byName = new Map<string, BlogAuthor | null>();
+  for (const author of authors) {
+    const name = author.name.normalize("NFKC").replace(/\s+/g, "");
+    byName.set(name, byName.has(name) ? null : author);
+  }
+  const items: BlogArticle[] = [];
+  for (let start = 0; start < valid.length; start += 4) {
+    const batch = await Promise.all(valid.slice(start, start + 4).map(async (item) => {
+      const author = group === "nogizaka"
+        ? byId.get(await nogizakaAuthorId(page, item.url))
+        : byName.get((item.authorName ?? "").normalize("NFKC").replace(/\s+/g, ""));
+      if (!author) throw new ArticleAuthorError("公式ブログの投稿者を特定できませんでした。時間をおいて一覧を再読み込みしてください。");
+      return {
+        id: item.id,
+        title: clean(item.title) || "無題のブログ",
+        ...(item.excerpt && !clean(item.title) ? { excerpt: clean(item.excerpt) } : {}),
+        date: clean(item.date).replace(/[./]/g, "-"),
+        url: item.url,
+        author,
+      };
+    }));
+    items.push(...batch);
+  }
   return { items, page: pageNumber, hasNext: raw.hasNext };
 }

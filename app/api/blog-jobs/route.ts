@@ -1,8 +1,9 @@
-import { getArticlePage, getAuthors } from "@/server/catalog";
+import { getArticlePage, getAuthors, groupSelectionAuthor } from "@/server/catalog";
+import { ArticleAuthorError } from "@/server/catalog/adapters";
 import { checkLocalAccess } from "@/server/local-access";
 import { localJobRunner } from "@/server/job-runner";
 import { blogSessionCookie } from "@/server/blog-session";
-import { SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
+import { ALL_AUTHORS_ID, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,9 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof SelectionError ? error.message : "取得条件を確認してください。" }, { status: 400 });
   }
   try {
-    const author = (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);
+    const author = selection.authorId === ALL_AUTHORS_ID
+      ? groupSelectionAuthor(selection.group)
+      : (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);
     if (!author) return Response.json({ error: "公式一覧にないメンバーです。" }, { status: 404 });
     const loadPage = (page: number) => getArticlePage(selection.group, author.id, page);
     const bulk = selection.range === "all" ? await collectBulkBatch(loadPage) : null;
@@ -34,6 +37,7 @@ export async function POST(request: Request) {
     return Response.json({ job }, { status: 202, headers: { "Set-Cookie": blogSessionCookie(request), "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof SelectionError) return Response.json({ error: error.message }, { status: 400 });
+    if (error instanceof ArticleAuthorError) return Response.json({ error: error.message }, { status: 502 });
     console.error("Failed to start blog job", error);
     return Response.json({ error: "ブログの保存を開始できませんでした。少し待って再試行してください。" }, { status: 502 });
   }

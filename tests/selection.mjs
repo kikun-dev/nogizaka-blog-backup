@@ -12,6 +12,8 @@ assert.equal(validateSelection({ ...base, content: "blog", range: "latest-n", co
 const selectedArticle = { url: article, sourcePage: 2 };
 assert.equal(validateSelection({ ...base, range: "selected", articles: [selectedArticle] }).articles[0].url.includes("ima="), false);
 assert.equal(validateSelection({ ...base, content: "blog", range: "all" }).range, "all");
+assert.equal(validateSelection({ ...base, authorId: "all", range: "latest-one" }).authorId, "all");
+assert.equal(validateSelection({ ...base, authorId: "all", content: "blog", range: "latest-n", count: 3 }).count, 3);
 
 for (const invalid of [
   { ...base, range: "latest-n", count: 21 },
@@ -25,6 +27,7 @@ for (const invalid of [
   { ...base, range: "all" },
   { ...base, content: "blog", range: "all", cursor: { page: -1, offset: 0 } },
   { ...base, content: "blog", range: "all", cursor: { page: 2, offset: 4 } },
+  { ...base, authorId: "all", content: "blog", range: "all" },
   { ...base, content: "blog", range: "latest-one", cursor: { page: 1, offset: 0 } },
 ]) {
   assert.throws(() => validateSelection(invalid), SelectionError);
@@ -38,6 +41,16 @@ await assert.rejects(
   SelectionError,
 );
 await assert.rejects(verifySelectedArticles(validSelection, async () => null), SelectionError);
+
+const secondArticle = article.replace("123", "456");
+const groupSelection = validateSelection({ ...base, authorId: "all", content: "blog", range: "selected",
+  articles: [{ url: article, sourcePage: 1 }, { url: secondArticle, sourcePage: 2 }] });
+const groupPages = {
+  1: { items: [{ url: article, id: "123", author: { id: "1", name: "投稿者 A" } }], page: 1, hasNext: true },
+  2: { items: [{ url: secondArticle, id: "456", author: { id: "2", name: "投稿者 B" } }], page: 2, hasNext: false },
+};
+assert.deepEqual((await verifySelectedArticles(groupSelection, async (page) => groupPages[page]))
+  .map(({ author }) => author.id), ["1", "2"]);
 
 const source = (page, start, count, hasNext = true) => ({
   page,

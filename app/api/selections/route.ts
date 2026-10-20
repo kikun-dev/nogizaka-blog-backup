@@ -1,6 +1,7 @@
-import { getArticlePage, getAuthors } from "@/server/catalog";
+import { getArticlePage, getAuthors, groupSelectionAuthor } from "@/server/catalog";
+import { ArticleAuthorError } from "@/server/catalog/adapters";
 import { checkLocalAccess } from "@/server/local-access";
-import { SELECTION_LIMITS, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
+import { ALL_AUTHORS_ID, SELECTION_LIMITS, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const author = (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);
+    const author = selection.authorId === ALL_AUTHORS_ID
+      ? groupSelectionAuthor(selection.group)
+      : (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);
     if (!author) return Response.json({ error: "公式一覧にないメンバーです。" }, { status: 404 });
     const loadPage = (page: number) => getArticlePage(selection.group, author.id, page);
     const previewArticles = selection.range === "selected"
@@ -34,6 +37,7 @@ export async function POST(request: Request) {
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof SelectionError) return Response.json({ error: error.message }, { status: 400 });
+    if (error instanceof ArticleAuthorError) return Response.json({ error: error.message }, { status: 502 });
     console.error("Failed to verify article selection", error);
     return Response.json({ error: "公式サイトの一覧を確認できませんでした。少し待って再試行してください。" }, { status: 502 });
   }
