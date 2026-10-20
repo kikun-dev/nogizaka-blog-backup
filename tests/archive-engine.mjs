@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -9,6 +9,8 @@ import { assertSameAuthor, markArticleVisited } from "../lib/archive/identity.mj
 import { sameAuthor } from "../lib/archive/paths.mjs";
 import { openArticle } from "../lib/archive/source.mjs";
 import { normalizeArticleUrl } from "../lib/archive/urls.mjs";
+import { ArchiveOutputLimitError, enforceArchiveOutputLimit } from "../lib/archive/output-limit.mjs";
+import { saveMhtml, savePdf } from "../lib/archive/formats.mjs";
 
 test("URL normalization keeps a non-member cd and rejects foreign origins", () => {
   const url = normalizeArticleUrl("https://www.nogizaka46.com/s/n46/diary/detail/104598?cd=STAFF&ima=1#top");
@@ -87,4 +89,61 @@ test("metadata inspection reports broken images without waiting for them", async
     countImages: async () => ({ detected: 9, loaded: 0, failed: 9 }),
   });
   assert.deepEqual(stats, { detected: 9, loaded: 0, failed: 9 });
+});
+
+test("overlapping format saves use separate temporary files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sakamichi-format-"));
+  try {
+    const pdfPaths = [];
+    const pdfDestination = path.join(root, "blog.pdf");
+    const page = (value) => ({
+      async emulateMedia() {},
+      async addStyleTag() {},
+      async pdf({ path: temporary }) {
+        pdfPaths.push(temporary);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await writeFile(temporary, value);
+      },
+    });
+    await Promise.all([savePdf(page("first"), pdfDestination), savePdf(page("second"), pdfDestination)]);
+    assert.equal(new Set(pdfPaths).size, 2);
+    assert.ok(["first", "second"].includes(await readFile(pdfDestination, "utf8")));
+
+    const mhtmlDestination = path.join(root, "blog.mhtml");
+    const context = (value) => ({
+      async newCDPSession() {
+        return { async send() { return { data: value }; }, async detach() {} };
+      },
+    });
+    await Promise.all([
+      saveMhtml(context("first"), {}, mhtmlDestination),
+      saveMhtml(context("second"), {}, mhtmlDestination),
+    ]);
+    assert.ok(["first", "second"].includes(await readFile(mhtmlDestination, "utf8")));
+    assert.deepEqual((await readdir(root)).sort(), ["blog.mhtml", "blog.pdf"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("output limit removes only the unaccepted blog directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sakamichi-limit-"));
+  try {
+    const accepted = path.join(root, "accepted");
+    const unaccepted = path.join(root, "unaccepted");
+    await mkdir(accepted);
+    await mkdir(unaccepted);
+    await writeFile(path.join(accepted, "blog.pdf"), "saved");
+    for (const name of ["blog.mhtml", "blog.pdf", "metadata.json"]) {
+      await writeFile(path.join(unaccepted, name), "oversized");
+    }
+
+    await enforceArchiveOutputLimit(19, 19, unaccepted);
+    assert.equal((await readdir(unaccepted)).length, 3);
+    await assert.rejects(enforceArchiveOutputLimit(20, 19, unaccepted), ArchiveOutputLimitError);
+    await assert.rejects(readdir(unaccepted), { code: "ENOENT" });
+    assert.equal(await readFile(path.join(accepted, "blog.pdf"), "utf8"), "saved");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

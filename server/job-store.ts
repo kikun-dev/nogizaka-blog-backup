@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BlogArticle } from "@/lib/catalog/types";
+import type { BlogArticle, BlogAuthor } from "@/lib/catalog/types";
+import type { BulkCursor } from "@/lib/selection";
 
 export type SavedPhoto = { name: string; mimeType: string };
 export type PhotoArticle = {
@@ -22,6 +23,18 @@ export type LocalJob = {
   articleUrl: string;
   kind?: "blog" | "photos";
   requestedArticles?: BlogArticle[];
+  requestedAuthor?: BlogAuthor;
+  nextCursor?: BulkCursor;
+  fullBackup?: boolean;
+  backupPhase?: "acquiring" | "packaging";
+  backupStopReason?: "article-limit" | "size-limit";
+  priorPartIds?: string[];
+  continuedByJobId?: string;
+  processedArticleIds?: string[];
+  savedDirectories?: string[];
+  blogZipReady?: boolean;
+  savedCount?: number;
+  outputBytes?: number;
   photoArticles?: PhotoArticle[];
   photoZipReady?: boolean;
   status: JobStatus;
@@ -33,7 +46,7 @@ export type LocalJob = {
 };
 
 export interface JobStore {
-  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles">): Promise<LocalJob>;
+  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase" | "priorPartIds">): Promise<LocalJob>;
   get(id: string): Promise<LocalJob | null>;
   update(id: string, change: Partial<LocalJob>): Promise<LocalJob>;
   failInterrupted(): Promise<void>;
@@ -78,7 +91,9 @@ export const localJobStore: JobStore = {
     const destination = jobPath(id);
     if (!destination) return null;
     try {
-      return JSON.parse(await readFile(destination, "utf8")) as LocalJob;
+      const job = JSON.parse(await readFile(destination, "utf8")) as LocalJob;
+      if (job.status === "succeeded") delete job.error;
+      return job;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -87,12 +102,14 @@ export const localJobStore: JobStore = {
   async update(id, change) {
     const current = await this.get(id);
     if (!current) throw new Error("Job not found");
+    if (current.status === "succeeded" && change.status === "failed") return current;
     const updated: LocalJob = {
       ...current,
       ...change,
       id: current.id,
       updatedAt: new Date().toISOString(),
     };
+    if (updated.status === "succeeded") delete updated.error;
     await save(updated);
     return updated;
   },

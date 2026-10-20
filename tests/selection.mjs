@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { SELECTION_LIMITS, SelectionError, collectLatestArticles, validateSelection, verifySelectedArticles } from "../lib/selection.ts";
+import { SELECTION_LIMITS, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "../lib/selection.ts";
 import { paginateArticles } from "../lib/selection-pages.ts";
 
 const base = { group: "hinatazaka", authorId: "000", content: "photos" };
@@ -11,7 +11,7 @@ assert.equal(validateSelection({ ...base, range: "latest-n", count: 20 }).count,
 assert.equal(validateSelection({ ...base, content: "blog", range: "latest-n", count: 10 }).count, 10);
 const selectedArticle = { url: article, sourcePage: 2 };
 assert.equal(validateSelection({ ...base, range: "selected", articles: [selectedArticle] }).articles[0].url.includes("ima="), false);
-assert.equal(validateSelection({ ...base, range: "all" }).range, "all");
+assert.equal(validateSelection({ ...base, content: "blog", range: "all" }).range, "all");
 
 for (const invalid of [
   { ...base, range: "latest-n", count: 21 },
@@ -22,6 +22,10 @@ for (const invalid of [
   { ...base, range: "selected", articles: [{ url: article, sourcePage: 0 }] },
   { ...base, range: "latest-one", articles: [selectedArticle] },
   { ...base, authorId: "../06", range: "all" },
+  { ...base, range: "all" },
+  { ...base, content: "blog", range: "all", cursor: { page: -1, offset: 0 } },
+  { ...base, content: "blog", range: "all", cursor: { page: 2, offset: 4 } },
+  { ...base, content: "blog", range: "latest-one", cursor: { page: 1, offset: 0 } },
 ]) {
   assert.throws(() => validateSelection(invalid), SelectionError);
 }
@@ -56,5 +60,37 @@ const oversizedPage = paginateArticles(oversized, null, { sourcePage: 1, offset:
 assert.equal(oversizedPage.items.length, 20);
 assert.deepEqual(oversizedPage.nextCursor, { sourcePage: 1, offset: 20 });
 assert.equal(paginateArticles(oversized, second, oversizedPage.nextCursor, 2, 10).items.length, 10);
+
+const bulkPages = { 1: source(1, 1, 7), 2: source(2, 8, 7), 3: source(3, 15, 4, false) };
+const loadBulk = async (page) => bulkPages[page] ?? null;
+const batchOne = await collectBulkBatch(loadBulk);
+assert.deepEqual(batchOne.articles.map(({ id }) => Number(id)), Array.from({ length: 10 }, (_, index) => index + 1));
+assert.deepEqual(batchOne.nextCursor, { page: 2, offset: 3, afterArticleId: "10" });
+assert.deepEqual(batchOne.positions[7], { page: 2, offset: 0 });
+const batchTwo = await collectBulkBatch(loadBulk, batchOne.nextCursor);
+assert.deepEqual(batchTwo.articles.map(({ id }) => Number(id)), Array.from({ length: 8 }, (_, index) => index + 11));
+assert.equal(batchTwo.nextCursor, undefined);
+assert.deepEqual(batchTwo.positions[0], { page: 2, offset: 3 });
+
+await assert.rejects(collectBulkBatch(async (page) => page === 1 ? source(1, 1, 2) : null),
+  /公式一覧を確認できませんでした/);
+await assert.rejects(collectBulkBatch(async (page) => page === 1 ? source(1, 1, 2) : source(2, 3, 0, false)),
+  /公式一覧を確認できませんでした/);
+
+const shifted = { 1: source(1, 1, 3), 2: source(2, 4, 3, false) };
+const beforeShift = await collectBulkBatch(async (page) => shifted[page], undefined, 4);
+assert.equal(beforeShift.nextCursor.afterArticleId, "4");
+shifted[1] = { ...shifted[1], items: [...shifted[1].items.slice(1), shifted[2].items[0]] };
+shifted[2] = { ...shifted[2], items: [shifted[2].items[1], shifted[2].items[2]] };
+const afterShift = await collectBulkBatch(async (page) => shifted[page], beforeShift.nextCursor, 10,
+  new Set(beforeShift.articles.map(({ id }) => id)));
+assert.deepEqual(afterShift.articles.map(({ id }) => id), ["5", "6"]);
+
+const removedAnchor = { 1: source(1, 1, 3), 2: source(2, 4, 3, false) };
+const prior = await collectBulkBatch(async (page) => removedAnchor[page], undefined, 3);
+removedAnchor[1] = { ...removedAnchor[1], items: removedAnchor[1].items.filter(({ id }) => id !== "3") };
+const recovered = await collectBulkBatch(async (page) => removedAnchor[page], prior.nextCursor, 10,
+  new Set(prior.articles.map(({ id }) => id)));
+assert.deepEqual(recovered.articles.map(({ id }) => id), ["4", "5", "6"]);
 
 console.log("Selection limits, ownership, and pagination passed");

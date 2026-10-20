@@ -4,6 +4,7 @@ import type { BlogArticle, BlogArticlePage, BlogAuthor, BlogGroup } from "./cata
 export type SelectionContent = "photos" | "blog";
 export type SelectionRange = "latest-one" | "latest-n" | "selected" | "all";
 export type SelectedArticle = { url: string; sourcePage: number };
+export type BulkCursor = { page: number; offset: number; afterArticleId?: string };
 
 export type SelectionRequest = {
   group: BlogGroup;
@@ -85,7 +86,72 @@ export function validateSelection(input: unknown): SelectionRequest {
     throw new SelectionError("ブログの指定が取得範囲と一致しません。");
   }
 
+  if (value.range === "all" && value.content !== "blog") {
+    throw new SelectionError("全件バックアップはブログ保存で選択してください。");
+  }
+  if (value.cursor !== undefined) throw new SelectionError("全件バックアップの続きは元のジョブから再開してください。");
+
   return selection;
+}
+
+export async function collectBulkBatch(
+  loadPage: (page: number) => Promise<BlogArticlePage | null>,
+  cursor: BulkCursor = { page: 1, offset: 0 },
+  limit = SELECTION_LIMITS.blog,
+  processedArticleIds: ReadonlySet<string> = new Set(),
+): Promise<{ articles: BlogArticle[]; positions: BulkCursor[]; nextCursor?: BulkCursor }> {
+  const articles: BlogArticle[] = [];
+  const positions: BulkCursor[] = [];
+  let { page, offset } = cursor;
+  const loaded = new Map<number, BlogArticlePage>();
+  const listingAt = async (number: number) => {
+    let listing = loaded.get(number);
+    if (!listing) {
+      listing = await loadPage(number) ?? undefined;
+      if (!listing?.items.length) throw new SelectionError("公式一覧を確認できませんでした。しばらくしてから再開してください。");
+      loaded.set(number, listing);
+    }
+    return listing;
+  };
+  if (cursor.afterArticleId) {
+    let anchor: BulkCursor | undefined;
+    for (const candidate of [...new Set([Math.max(1, page - 1), page])]) {
+      const listing = await listingAt(candidate);
+      const index = listing.items.findIndex(({ id }) => id === cursor.afterArticleId);
+      if (index >= 0) { anchor = { page: candidate, offset: index + 1 }; break; }
+    }
+    // The anchor may have been removed or moved farther back. Scan from the start
+    // and omit IDs already saved in this or earlier ZIP parts.
+    ({ page, offset } = anchor ?? { page: 1, offset: 0 });
+  } else if (processedArticleIds.size) {
+    // Jobs created before article ID cursors still need to survive shifted rows.
+    page = Math.max(1, page - 1);
+    offset = 0;
+  }
+  while (articles.length < limit && page <= 10000) {
+    const listing = await listingAt(page);
+    if (offset >= listing.items.length) {
+      if (!listing.hasNext) return { articles, positions };
+      page += 1;
+      offset = 0;
+      continue;
+    }
+    while (offset < listing.items.length && articles.length < limit) {
+      const article = listing.items[offset];
+      if (!processedArticleIds.has(article.id)) {
+        positions.push({ page, offset });
+        articles.push(article);
+      }
+      offset += 1;
+    }
+    if (offset === listing.items.length) {
+      if (!listing.hasNext) return { articles, positions };
+      page += 1;
+      offset = 0;
+    }
+  }
+  if (page > 10000) throw new SelectionError("公式一覧のページ上限に達しました。保存を再開する前に一覧を確認してください。");
+  return { articles, positions, nextCursor: { page, offset, afterArticleId: articles.at(-1)?.id ?? cursor.afterArticleId } };
 }
 
 export async function verifySelectedArticles(
