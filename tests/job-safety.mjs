@@ -24,6 +24,22 @@ test("module reload keeps the active runner", async () => {
   assert.equal(reloaded, first);
 });
 
+test("module reload replaces a runner from an older implementation", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  try {
+    globalThis.sakamichiLocalJobRunner = { oldImplementation: true };
+    globalThis.sakamichiLocalJobRunnerVersion = 1;
+    const upgraded = (await import("../server/job-runner.ts?upgrade-test")).localJobRunner;
+    assert.notEqual(upgraded, globalRunner);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 2);
+    assert.equal(typeof upgraded.submitPhotos, "function");
+  } finally {
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+  }
+});
+
 test("job API requires a configured matching bearer token", () => {
   const previous = process.env.LOCAL_ACCESS_TOKEN;
   try {
@@ -336,6 +352,7 @@ test("photo job treats zero images as success and retries an article with failed
   const jobs = new Map();
   let nextId = 0;
   const calls = [];
+  const progress = [];
   const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
   const articles = ["1", "2"].map((id) => ({ id, url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
   const store = {
@@ -349,6 +366,7 @@ test("photo job treats zero images as success and retries an article with failed
     async update(id, change) {
       const job = { ...jobs.get(id), ...change };
       jobs.set(id, job);
+      if (change.articleResults) progress.push({ completed: change.articleResults.length, current: change.currentArticle?.title });
       return { ...job };
     },
   };
@@ -382,6 +400,12 @@ test("photo job treats zero images as success and retries an article with failed
   const partial = await completed(first.id);
   assert.equal(partial.status, "partial");
   assert.deepEqual(partial.articleResults.map(({ status }) => status), ["succeeded", "failed"]);
+  assert.deepEqual(progress.slice(0, 4), [
+    { completed: 0, current: "記事1" },
+    { completed: 1, current: undefined },
+    { completed: 1, current: "記事2" },
+    { completed: 2, current: undefined },
+  ]);
   const retry = await runner.retryFailed(first.id);
   assert.equal((await completed(retry.id)).status, "succeeded");
   assert.deepEqual(calls, [["1", "2"], ["2"]]);

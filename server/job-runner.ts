@@ -383,5 +383,15 @@ export class LocalJobRunner implements JobRunner {
   }
 }
 
-const runnerGlobal = globalThis as typeof globalThis & { sakamichiLocalJobRunner?: JobRunner };
-export const localJobRunner: JobRunner = runnerGlobal.sakamichiLocalJobRunner ??= new LocalJobRunner(localJobStore);
+// Keep a runner across development module reloads, but replace one created by an
+// older implementation so new progress callbacks are actually used.
+const RUNNER_VERSION = 2;
+const runnerGlobal = globalThis as typeof globalThis & {
+  sakamichiLocalJobRunner?: JobRunner;
+  sakamichiLocalJobRunnerVersion?: number;
+};
+if (!runnerGlobal.sakamichiLocalJobRunner || runnerGlobal.sakamichiLocalJobRunnerVersion !== RUNNER_VERSION) {
+  runnerGlobal.sakamichiLocalJobRunner = new LocalJobRunner(localJobStore);
+  runnerGlobal.sakamichiLocalJobRunnerVersion = RUNNER_VERSION;
+}
+export const localJobRunner: JobRunner = runnerGlobal.sakamichiLocalJobRunner;
