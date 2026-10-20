@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LocalJob } from "@/server/job-store";
 import type { SelectionRequest } from "@/lib/selection";
-import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
+import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, serializePreferences, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
 import { AcquisitionPlanner } from "./acquisition-planner";
 import { PhotoGallery } from "./photo-gallery";
+import { RemoveSavedItemButton } from "./remove-saved-item-button";
 
 const statusLabel = {
   queued: "開始待ち",
@@ -39,6 +40,14 @@ export function LocalJobForm() {
   const activeJobId = job?.id;
   const activeStatus = job?.status;
   const busy = submitting || activeStatus === "queued" || activeStatus === "running";
+
+  function updatePreferencesPreview(next: LocalPreferences) {
+    setPreferencesPreview(next);
+    try {
+      if (next.favorites.length || next.lastSelection) window.localStorage.setItem(PREFERENCES_KEY, serializePreferences(next));
+      else window.localStorage.removeItem(PREFERENCES_KEY);
+    } catch { /* Storage may be disabled. */ }
+  }
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -301,11 +310,14 @@ export function LocalJobForm() {
             {preferencesPreview.favorites.length > 0 && <><h3>お気に入りのブログ</h3>
             <ul>{preferencesPreview.favorites.map((favorite) => <li key={favoriteKey(favorite)}>
               <button type="button" className="favorite-shortcut" onClick={() => { setPendingFavorite(favorite); tokenRef.current?.focus(); }}><strong>{favorite.authorName}</strong><small>{groupName[favorite.group]}</small></button>
+              <RemoveSavedItemButton label={`${favorite.authorName}をお気に入りから外す`} onClick={() => {
+                updatePreferencesPreview({ ...preferencesPreview, favorites: preferencesPreview.favorites.filter((entry) => favoriteKey(entry) !== favoriteKey(favorite)) });
+                if (pendingFavorite && favoriteKey(pendingFavorite) === favoriteKey(favorite)) setPendingFavorite(null);
+              }} />
             </li>)}</ul></>}
             {pendingFavorite && <p className="field-help" role="status">{pendingFavorite.authorName}を選択しました。トークンを入力すると取得条件に反映します。</p>}
-            {preferencesPreview.lastSelection && <p className="field-help">前回の取得条件を保存しています。トークン入力後に確認できます。</p>}
-            <p className="field-help">このブラウザーに保存されています。共用端末では使用後に削除してください。</p>
-            <button type="button" className="text-button preferences-clear" onClick={() => { try { window.localStorage.removeItem(PREFERENCES_KEY); } catch { /* Storage may be disabled. */ } setPreferencesPreview(emptyPreferences()); setPendingFavorite(null); }}>保存した設定を削除</button>
+            {preferencesPreview.lastSelection && <div className="saved-preferences-last"><span>前回の取得条件を保存しています。トークン入力後に確認できます。</span><RemoveSavedItemButton label="前回の条件を削除" onClick={() => updatePreferencesPreview({ ...preferencesPreview, lastSelection: null })} /></div>}
+            <p className="field-help">このブラウザーに保存されています。共用端末では各項目を外してください。</p>
           </div>}
           <p className="selection-start-help">トークンを入力すると取得条件を選べます。</p>
         </>}

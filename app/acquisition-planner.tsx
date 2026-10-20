@@ -5,6 +5,7 @@ import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types
 import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, serializePreferences, toggleFavorite, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
 import { paginateArticles, type ArticleCursor, type ListedArticle, type SelectionArticlePage } from "@/lib/selection-pages";
 import { ALL_AUTHORS_ID, SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest } from "@/lib/selection";
+import { RemoveSavedItemButton } from "./remove-saved-item-button";
 
 type Stage = "conditions" | "articles";
 
@@ -176,16 +177,6 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
     if (saved.range === "selected") setMessage("ブログを選び直してください。記事の選択履歴は保存していません。");
   }
 
-  function clearPreferences() {
-    invalidateConfirmation();
-    setPreferences(emptyPreferences());
-    changeGroup("nogizaka");
-    setContent("photos");
-    setRange("latest-one");
-    setCount("5");
-    setMessage("お気に入りと前回の取得条件を削除しました。");
-  }
-
   function changeAuthor(value: string) {
     invalidateConfirmation();
     setAuthorId(value);
@@ -313,15 +304,17 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
           <h4>お気に入り</h4>
           <ul>{preferences.favorites.map((favorite) => <li key={favoriteKey(favorite)}>
             <button type="button" className="favorite-shortcut" onClick={() => chooseFavorite(favorite)}><strong>{favorite.authorName}</strong><small>{groupName[favorite.group]}</small></button>
-            <button type="button" className="text-button favorite-remove" aria-label={`${favorite.authorName}をお気に入りから削除`} onClick={() => setPreferences((current) => ({ ...current, favorites: current.favorites.filter((item) => favoriteKey(item) !== favoriteKey(favorite)) }))}>削除</button>
+            <RemoveSavedItemButton label={`${favorite.authorName}をお気に入りから外す`} onClick={() => setPreferences((current) => ({ ...current, favorites: current.favorites.filter((item) => favoriteKey(item) !== favoriteKey(favorite)) }))} />
           </li>)}</ul>
         </div>}
         {preferences.lastSelection && <div className="saved-preferences-last">
           <span>前回の条件: {groupName[preferences.lastSelection.group]}・{preferences.lastSelection.authorId === ALL_AUTHORS_ID ? "全件" : preferences.favorites.find((favorite) => favoriteKey(favorite) === favoriteKey(preferences.lastSelection!))?.authorName ?? "選択したブログ主体"}・{contentName[preferences.lastSelection.content]}・{rangeName[preferences.lastSelection.range]}</span>
-          <button type="button" className="text-button" onClick={useLastSelection}>前回の条件を使う</button>
+          <div className="saved-preferences-actions">
+            <button type="button" className="text-button" onClick={useLastSelection}>前回の条件を使う</button>
+            <RemoveSavedItemButton label="前回の条件を削除" onClick={() => setPreferences((current) => ({ ...current, lastSelection: null }))} />
+          </div>
         </div>}
-        <button type="button" className="text-button preferences-clear" onClick={clearPreferences}>保存した設定を削除</button>
-        <p className="field-help">お気に入りと前回の条件は、このブラウザーに保存されます。共用端末では使用後に削除してください。</p>
+        <p className="field-help">このブラウザーに保存されています。共用端末では各項目を外してください。</p>
       </div>}
       {stage === "articles" ? (
         <div className="article-screen">
