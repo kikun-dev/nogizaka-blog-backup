@@ -110,6 +110,20 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .selection-start-help { margin: 24px 0; color: var(--muted); font-size: 14px; }
 .selection-flow { margin: 27px 0 0; padding-top: 25px; border-top: 1px solid var(--line); }
 .selection-flow h3 { margin: 0 0 16px; font-size: 18px; line-height: 1.4; }
+.saved-preferences { margin: 0 0 25px; padding: 17px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.saved-preferences h4 { margin: 0 0 10px; font-size: 15px; }
+.saved-preferences ul { display: flex; flex-wrap: wrap; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.saved-preferences li { display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.favorite-shortcut { display: flex; align-items: baseline; gap: 7px; min-height: 38px; padding: 6px 8px; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.favorite-shortcut:hover { color: var(--primary); }
+.favorite-shortcut small { color: var(--muted); font-size: 11px; }
+.saved-item-remove { display: grid; place-items: center; flex: none; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+.saved-item-remove svg { display: block; width: 17px; height: 17px; }
+.saved-item-remove:hover { background: var(--primary-pale); color: var(--primary); }
+.saved-preferences .field-help { margin-top: 8px; }
+.favorite-toggle { margin-top: 9px; }
+.landing-favorites { margin: 20px 0 0; }
+.landing-favorites h3 { margin: 0 0 10px; font-size: 16px; }
 .selection-field { margin: 0 0 18px; }
 .selection-field select { width: 100%; appearance: auto; }
 .selection-fieldset { min-width: 0; margin: 28px 0 0; padding: 15px 0 0; border: 0; border-top: 1px solid var(--line); }
