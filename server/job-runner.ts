@@ -383,15 +383,55 @@ export class LocalJobRunner implements JobRunner {
   }
 }
 
-// Keep a runner across development module reloads, but replace one created by an
-// older implementation so new progress callbacks are actually used.
-const RUNNER_VERSION = 2;
+// Keep active work across development module reloads. An old implementation is
+// replaced only after its running and queued work has finished.
+const RUNNER_VERSION = 3;
 const runnerGlobal = globalThis as typeof globalThis & {
   sakamichiLocalJobRunner?: JobRunner;
   sakamichiLocalJobRunnerVersion?: number;
+  sakamichiRunnerFacade?: JobRunner;
+  selectSakamichiRunner?: () => JobRunner;
 };
-if (!runnerGlobal.sakamichiLocalJobRunner || runnerGlobal.sakamichiLocalJobRunnerVersion !== RUNNER_VERSION) {
-  runnerGlobal.sakamichiLocalJobRunner = new LocalJobRunner(localJobStore);
-  runnerGlobal.sakamichiLocalJobRunnerVersion = RUNNER_VERSION;
+
+function hasUnfinishedWork(runner: JobRunner): boolean {
+  // Older hot-reloaded class instances do not have a public activity method.
+  const local = runner as JobRunner & Partial<{
+    running: number;
+    reserved: number;
+    waiting: LocalJob[];
+    activeKeys: Map<string, string>;
+    resuming: Set<string>;
+    continuations: Map<string, Promise<LocalJob | null>>;
+    retries: Map<string, Promise<LocalJob | null>>;
+    submissions: Map<string, Promise<LocalJob | null>>;
+  }>;
+  return (local.running ?? 0) > 0 || (local.reserved ?? 0) > 0
+    || (local.waiting?.length ?? 0) > 0 || (local.activeKeys?.size ?? 0) > 0
+    || (local.resuming?.size ?? 0) > 0 || (local.continuations?.size ?? 0) > 0
+    || (local.retries?.size ?? 0) > 0 || (local.submissions?.size ?? 0) > 0;
 }
-export const localJobRunner: JobRunner = runnerGlobal.sakamichiLocalJobRunner;
+
+function selectRunner(): JobRunner {
+  const previous = runnerGlobal.sakamichiLocalJobRunner;
+  if (!previous || (runnerGlobal.sakamichiLocalJobRunnerVersion !== RUNNER_VERSION && !hasUnfinishedWork(previous))) {
+    runnerGlobal.sakamichiLocalJobRunner = new LocalJobRunner(localJobStore);
+    runnerGlobal.sakamichiLocalJobRunnerVersion = RUNNER_VERSION;
+  }
+  return runnerGlobal.sakamichiLocalJobRunner!;
+}
+
+// The facade stays stable for existing route imports, while each call can move
+// to the new implementation once the previous runner becomes idle.
+runnerGlobal.selectSakamichiRunner = selectRunner;
+runnerGlobal.sakamichiRunnerFacade ??= {
+  initialize: () => runnerGlobal.selectSakamichiRunner!().initialize(),
+  submit: (url) => runnerGlobal.selectSakamichiRunner!().submit(url),
+  submitPhotos: (articles) => runnerGlobal.selectSakamichiRunner!().submitPhotos(articles),
+  submitBlogs: (articles, author, cursor) => runnerGlobal.selectSakamichiRunner!().submitBlogs(articles, author, cursor),
+  submitFullBackup: (author, url, cursor, priorPartIds) => runnerGlobal.selectSakamichiRunner!().submitFullBackup(author, url, cursor, priorPartIds),
+  continueFullBackup: (id) => runnerGlobal.selectSakamichiRunner!().continueFullBackup(id),
+  resumeFullBackup: (id) => runnerGlobal.selectSakamichiRunner!().resumeFullBackup(id),
+  retryFailed: (id) => runnerGlobal.selectSakamichiRunner!().retryFailed(id),
+};
+selectRunner();
+export const localJobRunner: JobRunner = runnerGlobal.sakamichiRunnerFacade;

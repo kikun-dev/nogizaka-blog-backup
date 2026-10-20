@@ -32,11 +32,39 @@ test("module reload replaces a runner from an older implementation", async () =>
     globalThis.sakamichiLocalJobRunnerVersion = 1;
     const upgraded = (await import("../server/job-runner.ts?upgrade-test")).localJobRunner;
     assert.notEqual(upgraded, globalRunner);
-    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 2);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 3);
     assert.equal(typeof upgraded.submitPhotos, "function");
   } finally {
     globalThis.sakamichiLocalJobRunner = globalRunner;
     globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+  }
+});
+
+test("module reload keeps a busy old runner until its work finishes", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  const globalSelector = globalThis.selectSakamichiRunner;
+  let oldInitializations = 0;
+  const busy = { running: 1, waiting: [], activeKeys: new Map(),
+    async initialize() { oldInitializations++; } };
+  try {
+    globalThis.sakamichiLocalJobRunner = busy;
+    globalThis.sakamichiLocalJobRunnerVersion = 2;
+    const facade = (await import("../server/job-runner.ts?busy-upgrade-test")).localJobRunner;
+    assert.equal(globalThis.sakamichiLocalJobRunner, busy);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 2);
+    await facade.initialize();
+    assert.equal(oldInitializations, 1);
+    assert.equal(globalThis.sakamichiLocalJobRunner, busy);
+
+    busy.running = 0;
+    globalThis.selectSakamichiRunner();
+    assert.notEqual(globalThis.sakamichiLocalJobRunner, busy);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 3);
+  } finally {
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+    globalThis.selectSakamichiRunner = globalSelector;
   }
 });
 
