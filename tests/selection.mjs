@@ -66,8 +66,10 @@ const loadBulk = async (page) => bulkPages[page] ?? null;
 const batchOne = await collectBulkBatch(loadBulk);
 assert.deepEqual(batchOne.articles.map(({ id }) => Number(id)), Array.from({ length: 10 }, (_, index) => index + 1));
 assert.deepEqual(batchOne.nextCursor, { page: 2, offset: 3 });
+assert.deepEqual(batchOne.positions[7], { page: 2, offset: 0 });
 const batchTwo = await collectBulkBatch(loadBulk, batchOne.nextCursor);
 assert.deepEqual(batchTwo.articles.map(({ id }) => Number(id)), Array.from({ length: 8 }, (_, index) => index + 11));
 assert.equal(batchTwo.nextCursor, undefined);
+assert.deepEqual(batchTwo.positions[0], { page: 2, offset: 3 });
 
 console.log("Selection limits, ownership, and pagination passed");

@@ -98,28 +98,30 @@ export async function collectBulkBatch(
   loadPage: (page: number) => Promise<BlogArticlePage | null>,
   cursor: BulkCursor = { page: 1, offset: 0 },
   limit = SELECTION_LIMITS.blog,
-): Promise<{ articles: BlogArticle[]; nextCursor?: BulkCursor }> {
+): Promise<{ articles: BlogArticle[]; positions: BulkCursor[]; nextCursor?: BulkCursor }> {
   const articles: BlogArticle[] = [];
+  const positions: BulkCursor[] = [];
   let { page, offset } = cursor;
   while (articles.length < limit && page <= 10000) {
     const listing = await loadPage(page);
-    if (!listing || !listing.items.length) return { articles };
+    if (!listing || !listing.items.length) return { articles, positions };
     if (offset >= listing.items.length) {
-      if (!listing.hasNext) return { articles };
+      if (!listing.hasNext) return { articles, positions };
       page += 1;
       offset = 0;
       continue;
     }
     const take = Math.min(limit - articles.length, listing.items.length - offset);
+    for (let index = 0; index < take; index++) positions.push({ page, offset: offset + index });
     articles.push(...listing.items.slice(offset, offset + take));
     offset += take;
     if (offset === listing.items.length) {
-      if (!listing.hasNext) return { articles };
+      if (!listing.hasNext) return { articles, positions };
       page += 1;
       offset = 0;
     }
   }
-  return { articles, nextCursor: page <= 10000 ? { page, offset } : undefined };
+  return { articles, positions, nextCursor: page <= 10000 ? { page, offset } : undefined };
 }
 
 export async function verifySelectedArticles(

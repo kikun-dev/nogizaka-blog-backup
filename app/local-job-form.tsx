@@ -176,6 +176,24 @@ export function LocalJobForm() {
     } finally { setSubmitting(false); }
   }
 
+  async function continueBackup() {
+    if (!job?.fullBackup || job.status !== "succeeded" || !job.backupStopReason || busy) return;
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/blog-jobs/${job.id}/continue`, {
+        method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json() as { job?: LocalJob; error?: string };
+      if (!response.ok || !data.job) throw new Error(data.error ?? "続きから開始できませんでした。");
+      window.localStorage.setItem("sakamichi-bulk-job", JSON.stringify({ id: data.job.id }));
+      setSavedBulkJobId(data.job.id);
+      setJob(data.job);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "続きから開始できませんでした。");
+    } finally { setSubmitting(false); }
+  }
+
   async function submitPhotoJob(selection: SelectionRequest) {
     if (busy) return;
     setView("photos");
@@ -249,15 +267,23 @@ export function LocalJobForm() {
       {message && <p className="form-message" role="alert">{message}</p>}
       {view === "blog" && job?.kind === "blog" && <div className="job-result" aria-live="polite">
         <div className="job-result-top"><strong>{statusLabel[job.status]}</strong><span className={`status-dot status-${job.status}`} aria-hidden="true" /></div>
+        {job.fullBackup && !!job.priorPartIds?.length && <div className="backup-parts">
+          <p>前のパートのZIP</p>
+          <ol>{job.priorPartIds.map((id, index) => <li key={id}><a href={`/api/blog-jobs/${id}/zip`}>パート{index + 1}を保存</a></li>)}</ol>
+        </div>}
         {(job.status === "queued" || job.status === "running") && <p>{job.fullBackup
           ? job.backupPhase === "packaging" ? `保存済み${job.savedCount ?? 0}件。1つのZIPを作成中です。` : `保存済み${job.savedCount ?? 0}件。公式一覧の最後まで自動で取得します。`
           : `保存済み ${job.savedCount ?? 0} / ${job.requestedArticles?.length ?? 1} 件。完了すると ZIP をダウンロードできます。`}</p>}
         {job.status === "succeeded" && <>
           <p>{job.savedCount ?? 1}件のブログを保存しました。</p>
-          <a className="primary-button" href={`/api/blog-jobs/${job.id}/zip`}>PDF・MHTMLをZIPで保存</a>
+          <a className="primary-button" href={`/api/blog-jobs/${job.id}/zip`}>{job.fullBackup && job.backupStopReason ? `今回の${job.savedCount ?? 0}件をZIPで保存` : "PDF・MHTMLをZIPで保存"}</a>
           <p className="field-help">ZIP内はメンバー別・ブログ別フォルダです。各ブログに metadata.json を含みます。</p>
           <p className="field-help">PC上の保存先: <code>{job.outputDirectory}</code></p>
-          {job.fullBackup && <p className="field-help">公式一覧の最後まで保存し、1つのZIPにまとめました。</p>}
+          {job.fullBackup && job.backupStopReason && job.nextCursor && <>
+            <p className="field-help">{job.backupStopReason === "article-limit" ? "5,000件" : "保存データ19 GB"}の上限に達しました。保存済み分はZIPにまとめました。続きは公式一覧の{job.nextCursor.page}ページ目・{job.nextCursor.offset + 1}件目から開始します。</p>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => void continueBackup()}>続きから全件バックアップを開始</button>
+          </>}
+          {job.fullBackup && !job.backupStopReason && <p className="field-help">公式一覧の最後まで保存しました。</p>}
         </>}
         {job.status === "failed" && job.error && <p className="form-message">{job.error}</p>}
         {job.status === "failed" && job.fullBackup && <button type="button" className="secondary-button" disabled={busy} onClick={() => void resumeFailedBackup()}>このバックアップを再開</button>}

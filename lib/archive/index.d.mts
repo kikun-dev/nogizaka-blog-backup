@@ -21,6 +21,10 @@ export type ArticleInfo = {
 
 export type ArchiveLogger = Pick<Console, "log" | "warn">;
 
+export class ArchiveOutputLimitError extends Error {
+  constructor(maxBytes: number);
+}
+
 export function inspectArticle(
   options: { url: string; headed?: boolean },
   dependencies?: { logger?: ArchiveLogger },
