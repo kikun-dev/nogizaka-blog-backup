@@ -15,6 +15,12 @@ registerHooks({
 const { checkLocalAccess } = await import("../server/local-access.ts");
 const { LocalJobRunner } = await import("../server/job-runner.ts");
 
+test("module reload keeps the active runner", async () => {
+  const first = (await import("../server/job-runner.ts")).localJobRunner;
+  const reloaded = (await import("../server/job-runner.ts?reload-test")).localJobRunner;
+  assert.equal(reloaded, first);
+});
+
 test("job API requires a configured matching bearer token", () => {
   const previous = process.env.LOCAL_ACCESS_TOKEN;
   try {
@@ -71,10 +77,13 @@ test("store marks unfinished jobs failed after restart", async () => {
     const queued = await localJobStore.create("https://example.com");
     const succeeded = await localJobStore.create("https://example.com");
     await localJobStore.update(succeeded.id, { status: "succeeded" });
+    await localJobStore.update(succeeded.id, { error: "old failure" });
     await localJobStore.failInterrupted();
+    await localJobStore.update(succeeded.id, { status: "failed", error: "late failure" });
     assert.equal((await localJobStore.get(running.id)).status, "failed");
     assert.equal((await localJobStore.get(queued.id)).status, "failed");
     assert.equal((await localJobStore.get(succeeded.id)).status, "succeeded");
+    assert.equal((await localJobStore.get(succeeded.id)).error, undefined);
   } finally {
     process.chdir(originalDirectory);
     await rm(directory, { recursive: true, force: true });

@@ -1,4 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { open, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -100,7 +101,7 @@ export async function createStreamingBlogZip(output: string, directories: string
       archive.addFile(file, `${directory.split(path.sep).join("/")}/${name}`, { compress: false });
     }
   }
-  const temporary = path.join(root, "blogs.zip.part");
+  const temporary = path.join(root, `blogs.zip.${randomUUID()}.part`);
   const destination = path.join(root, "blogs.zip");
   let bytes = 0;
   const limiter = new Transform({

@@ -104,7 +104,7 @@ export class LocalJobRunner implements JobRunner {
 
   private async run(job: LocalJob) {
     try {
-      await this.store.update(job.id, { status: "running" });
+      await this.store.update(job.id, { status: "running", error: undefined });
       if (job.kind === "photos") {
         const [{ acquirePhotos }, { createPhotoZip }] = await Promise.all([
           import("./photo-acquisition"), import("./photo-zip"),
@@ -143,7 +143,7 @@ export class LocalJobRunner implements JobRunner {
       await createBlogZip(job.outputDirectory, result.saved.map(({ directory }) => directory));
       await this.store.update(job.id, {
         status: "succeeded", savedCount: result.saved.length, outputBytes: result.totalBytes,
-        blogZipReady: true, log: log.slice(-80),
+        blogZipReady: true, log: log.slice(-80), error: undefined,
       });
     } catch (error) {
       await this.store.update(job.id, {
@@ -214,8 +214,9 @@ export class LocalJobRunner implements JobRunner {
     logger.log(`取得した${job.savedCount}件を1つのZIPにまとめています。`);
     job = await this.store.update(job.id, { backupPhase: "packaging", log: [...log] });
     await createStreamingBlogZip(job.outputDirectory, job.savedDirectories ?? []);
-    await this.store.update(job.id, { status: "succeeded", blogZipReady: true, log: [...log] });
+    await this.store.update(job.id, { status: "succeeded", blogZipReady: true, log: [...log], error: undefined });
   }
 }
 
-export const localJobRunner: JobRunner = new LocalJobRunner(localJobStore);
+const runnerGlobal = globalThis as typeof globalThis & { sakamichiLocalJobRunner?: JobRunner };
+export const localJobRunner: JobRunner = runnerGlobal.sakamichiLocalJobRunner ??= new LocalJobRunner(localJobStore);

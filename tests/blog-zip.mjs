@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createBlogZip, createStreamingBlogZip } from "../server/blog-zip.ts";
@@ -42,5 +42,5 @@ for (const item of [directory, secondDirectory]) {
   }
 }
 await assert.rejects(createStreamingBlogZip(root, [directory], 50), /容量/);
-await assert.rejects(stat(fullZip + ".part"), { code: "ENOENT" });
+assert.equal((await readdir(root)).filter((name) => name.endsWith(".part")).length, 0);
 console.log("Blog ZIP integrity and size limits passed");

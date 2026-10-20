@@ -259,7 +259,7 @@ export function LocalJobForm() {
           <p className="field-help">PC上の保存先: <code>{job.outputDirectory}</code></p>
           {job.fullBackup && <p className="field-help">公式一覧の最後まで保存し、1つのZIPにまとめました。</p>}
         </>}
-        {job.error && <p className="form-message">{job.error}</p>}
+        {job.status === "failed" && job.error && <p className="form-message">{job.error}</p>}
         {job.status === "failed" && job.fullBackup && <button type="button" className="secondary-button" disabled={busy} onClick={() => void resumeFailedBackup()}>このバックアップを再開</button>}
         {job.log.length > 0 && <details><summary>処理ログを確認</summary><pre>{job.log.join("\n")}</pre></details>}
       </div>}

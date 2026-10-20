@@ -88,7 +88,9 @@ export const localJobStore: JobStore = {
     const destination = jobPath(id);
     if (!destination) return null;
     try {
-      return JSON.parse(await readFile(destination, "utf8")) as LocalJob;
+      const job = JSON.parse(await readFile(destination, "utf8")) as LocalJob;
+      if (job.status === "succeeded") delete job.error;
+      return job;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -97,12 +99,14 @@ export const localJobStore: JobStore = {
   async update(id, change) {
     const current = await this.get(id);
     if (!current) throw new Error("Job not found");
+    if (current.status === "succeeded" && change.status === "failed") return current;
     const updated: LocalJob = {
       ...current,
       ...change,
       id: current.id,
       updatedAt: new Date().toISOString(),
     };
+    if (updated.status === "succeeded") delete updated.error;
     await save(updated);
     return updated;
   },
