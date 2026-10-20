@@ -1,6 +1,9 @@
-import { createReadStream } from "node:fs";
-import { open, stat, unlink } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { open, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { Transform } from "node:stream";
+import * as yazl from "yazl";
 
 const table = Uint32Array.from({ length: 256 }, (_, index) => {
   let value = index;
@@ -81,4 +84,38 @@ export async function createBlogZip(output: string, directories: string[], maxBy
   }
   await zip.close();
   return destination;
+}
+
+const MAX_FULL_ZIP_BYTES = 20 * 1024 * 1024 * 1024;
+
+export async function createStreamingBlogZip(output: string, directories: string[], maxBytes = MAX_FULL_ZIP_BYTES) {
+  const archive = new yazl.ZipFile();
+  const root = path.resolve(output);
+  for (const directory of directories) {
+    const resolved = path.resolve(root, directory);
+    if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error("ZIPに追加できない保存先です。");
+    for (const name of ["blog.pdf", "blog.mhtml", "metadata.json"]) {
+      const file = path.join(resolved, name);
+      if (!(await stat(file)).isFile()) throw new Error("ZIPに追加できないファイルがあります。");
+      archive.addFile(file, `${directory.split(path.sep).join("/")}/${name}`, { compress: false });
+    }
+  }
+  const temporary = path.join(root, "blogs.zip.part");
+  const destination = path.join(root, "blogs.zip");
+  let bytes = 0;
+  const limiter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.length;
+      callback(bytes > maxBytes ? new Error("ZIPの容量が20 GBを超えました。") : null, chunk);
+    },
+  });
+  archive.end();
+  try {
+    await pipeline(archive.outputStream, limiter, createWriteStream(temporary));
+    await rename(temporary, destination);
+    return destination;
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
 }

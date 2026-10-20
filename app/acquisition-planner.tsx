@@ -324,8 +324,8 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog"} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
             {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
               <strong>全件バックアップについて</strong>
-              <p>保存に時間がかかるため、1回に最大10件ずつ処理します。完了後、結果画面から次の10件へ進めます。</p>
-              <p>ZIPは回ごとに分かれます。各回のファイルは開発PCのフォルダーにも残ります。1回の出力とZIPは、それぞれ512 MBまでです。</p>
+              <p>公式一覧の最後まで自動で取得し、完了後に1つのZIPにまとめます。内部では10件ずつ処理するため、件数に応じて長時間かかります。処理中、ほかの保存ジョブは待機します。</p>
+              <p>保存データは最大19 GB、ZIPは最大20 GB、ブログは最大5,000件です。作成中は開発PCに保存データとZIPの両方を置く空き容量が必要です。4 GBを超えるZIPはZIP64対応アプリで開いてください。中断した場合は同じジョブを再開できます。</p>
             </div>}
           </fieldset>
           {message && <div role="alert" className="catalog-error"><p className="form-message">{message}</p>{authors.length === 0 && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>一覧を再読み込み</button>}</div>}
@@ -347,7 +347,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
               )}
               {plan.content === "photos" && plan.range !== "all" ?
                 <button type="button" className="primary-button" disabled={busy} onClick={() => void onSavePhotos(validateSelection(plan))}>{busy ? "取得中…" : `写真を取得（${plan.previewArticles?.length ?? 0}件）`}</button>
-                : plan.content === "blog" ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(validateSelection(plan))}>{busy ? "保存中…" : plan.range === "all" ? `全件バックアップを開始（まず${plan.previewArticles?.length ?? 0}件）` : `ブログを保存（${plan.previewArticles?.length ?? 0}件）`}</button>
+                : plan.content === "blog" ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(validateSelection(plan))}>{busy ? "保存中…" : plan.range === "all" ? "全件バックアップを開始" : `ブログを保存（${plan.previewArticles?.length ?? 0}件）`}</button>
                 : null}
             </div>
           )}

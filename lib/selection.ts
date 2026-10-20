@@ -13,7 +13,6 @@ export type SelectionRequest = {
   range: SelectionRange;
   count?: number;
   articles?: SelectedArticle[];
-  cursor?: BulkCursor;
 };
 
 export type SelectionPlan = SelectionRequest & {
@@ -90,16 +89,7 @@ export function validateSelection(input: unknown): SelectionRequest {
   if (value.range === "all" && value.content !== "blog") {
     throw new SelectionError("全件バックアップはブログ保存で選択してください。");
   }
-  if (value.range === "all" && value.cursor !== undefined) {
-    const cursor = value.cursor as Record<string, unknown> | null;
-    if (!cursor || typeof cursor !== "object" || !Number.isSafeInteger(cursor.page) || !Number.isSafeInteger(cursor.offset)
-      || (cursor.page as number) < 1 || (cursor.page as number) > 10000 || (cursor.offset as number) < 0 || (cursor.offset as number) > 1000) {
-      throw new SelectionError("全件バックアップの続きの位置を確認してください。");
-    }
-    selection.cursor = { page: cursor.page as number, offset: cursor.offset as number };
-  } else if (value.range !== "all" && value.cursor !== undefined) {
-    throw new SelectionError("続きの位置が取得範囲と一致しません。");
-  }
+  if (value.cursor !== undefined) throw new SelectionError("全件バックアップの続きは元のジョブから再開してください。");
 
   return selection;
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createBlogZip } from "../server/blog-zip.ts";
+import { createBlogZip, createStreamingBlogZip } from "../server/blog-zip.ts";
 
 const root = await mkdtemp(path.join(os.tmpdir(), "blog-zip-test-"));
 const directory = path.join("Nogizaka", "投稿者", "2026-10-20_123_ブログ");
@@ -27,4 +27,20 @@ assert.equal(bytes.readUInt32LE(position), 0x02014b50);
 assert.equal(bytes.readUInt32LE(bytes.length - 22), 0x06054b50);
 await assert.rejects(createBlogZip(root, [directory], 50), /容量/);
 await assert.rejects(stat(zip), { code: "ENOENT" });
+const secondDirectory = path.join("Nogizaka", "投稿者", "2026-10-19_122_前のブログ");
+await mkdir(path.join(root, secondDirectory), { recursive: true });
+for (const file of ["blog.pdf", "blog.mhtml", "metadata.json"]) {
+  await writeFile(path.join(root, secondDirectory, file), `2:${file}`);
+}
+const fullZip = await createStreamingBlogZip(root, [directory, secondDirectory]);
+const fullBytes = await readFile(fullZip);
+assert.equal(fullBytes.readUInt32LE(0), 0x04034b50);
+assert.equal(fullBytes.readUInt32LE(fullBytes.length - 22), 0x06054b50);
+for (const item of [directory, secondDirectory]) {
+  for (const file of ["blog.pdf", "blog.mhtml", "metadata.json"]) {
+    assert.ok(fullBytes.includes(Buffer.from(`${item.split(path.sep).join("/")}/${file}`)));
+  }
+}
+await assert.rejects(createStreamingBlogZip(root, [directory], 50), /容量/);
+await assert.rejects(stat(fullZip + ".part"), { code: "ENOENT" });
 console.log("Blog ZIP integrity and size limits passed");

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LocalJob } from "@/server/job-store";
-import { validateSelection, type SelectionRequest } from "@/lib/selection";
+import type { SelectionRequest } from "@/lib/selection";
 import { AcquisitionPlanner } from "./acquisition-planner";
 import { PhotoGallery } from "./photo-gallery";
 
@@ -19,7 +19,6 @@ export function LocalJobForm() {
   const [accessToken, setAccessToken] = useState("");
   const [readyToken, setReadyToken] = useState("");
   const [job, setJob] = useState<LocalJob | null>(null);
-  const [bulkSelection, setBulkSelection] = useState<SelectionRequest | null>(null);
   const [savedBulkJobId, setSavedBulkJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -100,7 +99,6 @@ export function LocalJobForm() {
       return;
     }
     setUrl(articleUrl);
-    setBulkSelection(null);
     setView("blog");
     setSubmitting(true);
     setMessage("");
@@ -123,7 +121,6 @@ export function LocalJobForm() {
 
   async function submitBlogJob(selection: SelectionRequest) {
     if (busy) return;
-    setBulkSelection(selection.range === "all" ? selection : null);
     setView("blog");
     setSubmitting(true);
     setMessage("");
@@ -138,7 +135,7 @@ export function LocalJobForm() {
       if (!response.ok || !data.job) throw new Error(data.error ?? "ブログの保存を開始できませんでした。");
       setJob(data.job);
       if (selection.range === "all") {
-        window.localStorage.setItem("sakamichi-bulk-job", JSON.stringify({ id: data.job.id, selection }));
+        window.localStorage.setItem("sakamichi-bulk-job", JSON.stringify({ id: data.job.id }));
         setSavedBulkJobId(data.job.id);
       }
     } catch (error) {
@@ -149,21 +146,34 @@ export function LocalJobForm() {
   async function resumeBulkJob() {
     if (!readyToken || !savedBulkJobId) return;
     try {
-      const saved = JSON.parse(window.localStorage.getItem("sakamichi-bulk-job") ?? "null") as { id?: string; selection?: unknown } | null;
+      const saved = JSON.parse(window.localStorage.getItem("sakamichi-bulk-job") ?? "null") as { id?: string } | null;
       if (!saved || saved.id !== savedBulkJobId || !/^[0-9a-f-]{36}$/.test(saved.id)) throw new Error("前回の保存情報を確認できませんでした。");
-      const selection = validateSelection(saved.selection);
-      if (selection.range !== "all") throw new Error("前回の保存情報を確認できませんでした。");
       const response = await fetch(`/api/jobs/${saved.id}`, { cache: "no-store", headers: { Authorization: `Bearer ${readyToken}` } });
       if (!response.ok) throw new Error("前回のジョブを読み込めませんでした。");
       const data = await response.json() as { job: LocalJob };
-      if (data.job.kind !== "blog") throw new Error("前回の保存情報を確認できませんでした。");
-      setBulkSelection(selection);
+      if (!data.job.fullBackup) throw new Error("前回の保存情報を確認できませんでした。");
       setJob(data.job);
       setMessage("");
       setView("blog");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "前回のジョブを読み込めませんでした。");
     }
+  }
+
+  async function resumeFailedBackup() {
+    if (!job?.fullBackup || job.status !== "failed" || busy) return;
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/blog-jobs/${job.id}/resume`, {
+        method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json() as { job?: LocalJob; error?: string };
+      if (!response.ok || !data.job) throw new Error(data.error ?? "再開できませんでした。");
+      setJob(data.job);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "再開できませんでした。");
+    } finally { setSubmitting(false); }
   }
 
   async function submitPhotoJob(selection: SelectionRequest) {
@@ -239,17 +249,18 @@ export function LocalJobForm() {
       {message && <p className="form-message" role="alert">{message}</p>}
       {view === "blog" && job?.kind === "blog" && <div className="job-result" aria-live="polite">
         <div className="job-result-top"><strong>{statusLabel[job.status]}</strong><span className={`status-dot status-${job.status}`} aria-hidden="true" /></div>
-        {(job.status === "queued" || job.status === "running") && <p>保存済み {job.savedCount ?? 0} / {job.requestedArticles?.length ?? 1} 件。完了すると ZIP をダウンロードできます。</p>}
+        {(job.status === "queued" || job.status === "running") && <p>{job.fullBackup
+          ? job.backupPhase === "packaging" ? `保存済み${job.savedCount ?? 0}件。1つのZIPを作成中です。` : `保存済み${job.savedCount ?? 0}件。公式一覧の最後まで自動で取得します。`
+          : `保存済み ${job.savedCount ?? 0} / ${job.requestedArticles?.length ?? 1} 件。完了すると ZIP をダウンロードできます。`}</p>}
         {job.status === "succeeded" && <>
           <p>{job.savedCount ?? 1}件のブログを保存しました。</p>
           <a className="primary-button" href={`/api/blog-jobs/${job.id}/zip`}>PDF・MHTMLをZIPで保存</a>
           <p className="field-help">ZIP内はメンバー別・ブログ別フォルダです。各ブログに metadata.json を含みます。</p>
           <p className="field-help">PC上の保存先: <code>{job.outputDirectory}</code></p>
-          {bulkSelection && job.nextCursor && <button type="button" className="secondary-button" disabled={busy} onClick={() => void submitBlogJob({ ...bulkSelection, cursor: job.nextCursor })}>次の10件を保存</button>}
-          {bulkSelection && !job.nextCursor && <p className="field-help">公式一覧の最後まで保存しました。</p>}
+          {job.fullBackup && <p className="field-help">公式一覧の最後まで保存し、1つのZIPにまとめました。</p>}
         </>}
         {job.error && <p className="form-message">{job.error}</p>}
-        {job.status === "failed" && bulkSelection && <button type="button" className="secondary-button" onClick={() => void submitBlogJob(bulkSelection)}>この10件を再試行</button>}
+        {job.status === "failed" && job.fullBackup && <button type="button" className="secondary-button" disabled={busy} onClick={() => void resumeFailedBackup()}>このバックアップを再開</button>}
         {job.log.length > 0 && <details><summary>処理ログを確認</summary><pre>{job.log.join("\n")}</pre></details>}
       </div>}
       {view === "photos" && job?.kind === "photos" && job.status !== "succeeded" && <div className="job-result" aria-live="polite">

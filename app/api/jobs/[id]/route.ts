@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { localJobStore } from "@/server/job-store";
 import { localJobRunner } from "@/server/job-runner";
 import { checkLocalAccess } from "@/server/local-access";
+import { blogSessionCookie } from "@/server/blog-session";
 
 export const runtime = "nodejs";
 
@@ -12,5 +13,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const job = await localJobStore.get(id);
   if (!job) return NextResponse.json({ error: "ジョブが見つかりません。" }, { status: 404 });
-  return NextResponse.json({ job });
+  return NextResponse.json({ job }, { headers: job.kind === "blog" ? { "Set-Cookie": blogSessionCookie(request), "Cache-Control": "no-store" } : { "Cache-Control": "no-store" } });
 }

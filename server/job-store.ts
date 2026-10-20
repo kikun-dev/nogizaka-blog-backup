@@ -25,6 +25,10 @@ export type LocalJob = {
   requestedArticles?: BlogArticle[];
   requestedAuthor?: BlogAuthor;
   nextCursor?: BulkCursor;
+  fullBackup?: boolean;
+  backupPhase?: "acquiring" | "packaging";
+  processedArticleIds?: string[];
+  savedDirectories?: string[];
   blogZipReady?: boolean;
   savedCount?: number;
   outputBytes?: number;
@@ -39,7 +43,7 @@ export type LocalJob = {
 };
 
 export interface JobStore {
-  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor">): Promise<LocalJob>;
+  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase">): Promise<LocalJob>;
   get(id: string): Promise<LocalJob | null>;
   update(id: string, change: Partial<LocalJob>): Promise<LocalJob>;
   failInterrupted(): Promise<void>;

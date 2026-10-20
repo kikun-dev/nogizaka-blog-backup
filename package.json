@@ -32,12 +32,14 @@
     "next": "^16.0.0",
     "playwright": "^1.60.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/yazl": "^3.3.1",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.0.0",
     "typescript": "^5.0.0"

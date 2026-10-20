@@ -37,8 +37,9 @@ export function archiveWebArticles(
     output: string;
     author?: { id: string; name: string; type: string; group: string };
     maxBytes?: number;
+    cacheResults?: boolean;
   },
-  dependencies?: { logger?: ArchiveLogger; onProgress?: (count: number, bytes: number) => Promise<void> },
+  dependencies?: { logger?: ArchiveLogger; onProgress?: (count: number, bytes: number, saved: { directory: string; metadata: { id: string } }) => Promise<void> },
 ): Promise<{
   saved: { directory: string; metadata: { id: string; title: string; date: string; url: string } }[];
   totalBytes: number;

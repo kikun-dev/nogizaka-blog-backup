@@ -80,3 +80,23 @@ test("store marks unfinished jobs failed after restart", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("failed full backup resumes the same job and preserves progress", async () => {
+  const saved = { id: "backup-1", articleUrl: "https://example.com", fullBackup: true,
+    status: "failed", savedCount: 12, outputBytes: 4096, nextCursor: { page: 2, offset: 3 },
+    savedDirectories: ["first", "second"] };
+  const started = [];
+  const store = {
+    async failInterrupted() {},
+    async get(id) { return id === saved.id ? { ...saved } : null; },
+    async update(id, change) { assert.equal(id, saved.id); Object.assign(saved, change); return { ...saved }; },
+  };
+  const runner = new LocalJobRunner(store, async (job) => { started.push(job); });
+  const resumed = await runner.resumeFullBackup(saved.id);
+  assert.equal(resumed.id, saved.id);
+  assert.equal(resumed.savedCount, 12);
+  assert.deepEqual(resumed.nextCursor, { page: 2, offset: 3 });
+  assert.equal(resumed.status, "queued");
+  assert.equal(await runner.resumeFullBackup(saved.id), null);
+  assert.equal(started.length, 1);
+});

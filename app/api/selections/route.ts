@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       ? await verifySelectedArticles(selection, loadPage)
       : selection.range === "latest-one" || selection.range === "latest-n"
         ? await collectLatestArticles(selection.range === "latest-one" ? 1 : selection.count!, loadPage)
-        : (await collectBulkBatch(loadPage, selection.cursor)).articles;
+        : (await collectBulkBatch(loadPage)).articles;
     if (previewArticles.length === 0) {
       return Response.json({ error: "ブログが見つかりませんでした。" }, { status: 404 });
     }

@@ -11,7 +11,7 @@ assert.equal(validateSelection({ ...base, range: "latest-n", count: 20 }).count,
 assert.equal(validateSelection({ ...base, content: "blog", range: "latest-n", count: 10 }).count, 10);
 const selectedArticle = { url: article, sourcePage: 2 };
 assert.equal(validateSelection({ ...base, range: "selected", articles: [selectedArticle] }).articles[0].url.includes("ima="), false);
-assert.deepEqual(validateSelection({ ...base, content: "blog", range: "all", cursor: { page: 2, offset: 4 } }).cursor, { page: 2, offset: 4 });
+assert.equal(validateSelection({ ...base, content: "blog", range: "all" }).range, "all");
 
 for (const invalid of [
   { ...base, range: "latest-n", count: 21 },
@@ -24,6 +24,7 @@ for (const invalid of [
   { ...base, authorId: "../06", range: "all" },
   { ...base, range: "all" },
   { ...base, content: "blog", range: "all", cursor: { page: -1, offset: 0 } },
+  { ...base, content: "blog", range: "all", cursor: { page: 2, offset: 4 } },
   { ...base, content: "blog", range: "latest-one", cursor: { page: 1, offset: 0 } },
 ]) {
   assert.throws(() => validateSelection(invalid), SelectionError);

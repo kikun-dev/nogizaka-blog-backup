@@ -22,12 +22,14 @@ export async function POST(request: Request) {
     const author = (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);
     if (!author) return Response.json({ error: "公式一覧にないメンバーです。" }, { status: 404 });
     const loadPage = (page: number) => getArticlePage(selection.group, author.id, page);
-    const bulk = selection.range === "all" ? await collectBulkBatch(loadPage, selection.cursor) : null;
+    const bulk = selection.range === "all" ? await collectBulkBatch(loadPage) : null;
     const articles = bulk?.articles ?? (selection.range === "selected"
       ? await verifySelectedArticles(selection, loadPage)
       : await collectLatestArticles(selection.range === "latest-one" ? 1 : selection.count!, loadPage));
     if (!articles.length) return Response.json({ error: "保存するブログが見つかりませんでした。" }, { status: 404 });
-    const job = await localJobRunner.submitBlogs(articles, author, bulk?.nextCursor);
+    const job = selection.range === "all"
+      ? await localJobRunner.submitFullBackup(author, articles[0].url)
+      : await localJobRunner.submitBlogs(articles, author);
     if (!job) return Response.json({ error: "待機中のジョブが上限に達しています。後で再試行してください。" }, { status: 429 });
     return Response.json({ job }, { status: 202, headers: { "Set-Cookie": blogSessionCookie(request), "Cache-Control": "no-store" } });
   } catch (error) {
