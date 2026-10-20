@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { authorListUrl, articlesUrl, isAuthorId, readArticles, readAuthors } from "../server/catalog/adapters.ts";
+import { authorListUrl, articlesUrl, groupArticlesUrl, isAuthorId, parseNogizakaAuthorId, readArticles, readAuthors, readGroupArticles } from "../server/catalog/adapters.ts";
 import { isExpectedListingUrl } from "../server/catalog/listing-url.ts";
 
 assert.equal(isAuthorId("000"), true);
 assert.equal(isAuthorId("../detail/1"), false);
 assert.equal(articlesUrl("hinatazaka", "000", 2), "https://www.hinatazaka46.com/s/official/diary/member/list?ct=000&page=1");
+assert.equal(groupArticlesUrl("hinatazaka", 2), "https://www.hinatazaka46.com/s/official/diary/member/list?page=1");
+assert.equal(parseNogizakaAuthorId('<a class="bd--prof__tex__a" href="/s/n46/diary/MEMBER/list?ct=55397">池田 瑛紗</a>',
+  "https://www.nogizaka46.com/s/n46/diary/detail/104934"), "55397");
+assert.throws(() => parseNogizakaAuthorId('<a href="?ct=1">別のリンク</a>', "https://www.nogizaka46.com/"),
+  /投稿者を確認できませんでした/);
+assert.throws(() => parseNogizakaAuthorId('<a class="bd--prof__tex__a" href="https://example.com/s/n46/diary/MEMBER/list?ct=55397">偽リンク</a>',
+  "https://www.nogizaka46.com/s/n46/diary/detail/104934"), /投稿者を確認できませんでした/);
 const firstPageUrl = authorListUrl("sakurazaka", "70");
 const secondPageUrl = articlesUrl("sakurazaka", "70", 2);
 assert.equal(isExpectedListingUrl(firstPageUrl, `${firstPageUrl}&ima=0000`), true);
@@ -57,6 +64,21 @@ try {
     assert.equal(articles.items[0].author.id, authors[0].id);
     assert.equal(articles.items[0].date.startsWith("2026-10-19"), true);
     assert.equal(articles.hasNext, true);
+    await page.close();
+  }
+
+  for (const [group, origin, card] of [
+    ["sakurazaka", "https://sakurazaka46.com", (id, name) => `<ul class="com-blog-part"><li class="box"><a href="/s/s46/diary/detail/${id}"><div class="prof"><p class="name">${name}</p></div><div class="date-title"><span class="date">2026/10/20</span><span class="title">記事${id}</span></div></a></li></ul>`],
+    ["hinatazaka", "https://www.hinatazaka46.com", (id, name) => `<div class="p-blog-article"><span class="c-blog-article__name">${name}</span><span class="c-blog-article__title">記事${id}</span><span class="c-blog-article__date">2026.10.20</span><a href="/s/official/diary/detail/${id}">開く</a></div>`],
+  ]) {
+    const page = await browser.newPage();
+    const authors = ["投稿者 A", "投稿者 B"].map((name, index) => ({
+      id: String(index + 1), name, type: "member", group, listUrl: authorListUrl(group, String(index + 1)),
+    }));
+    await page.setContent(`<base href="${origin}">${card(101, authors[0].name)}${card(102, authors[1].name)}`);
+    const listing = await readGroupArticles(group, authors, page, 1);
+    assert.deepEqual(listing.items.map(({ author }) => author.id), ["1", "2"]);
+    await assert.rejects(readGroupArticles(group, authors.slice(0, 1), page, 1), /投稿者を特定できませんでした/);
     await page.close();
   }
   console.log("Catalog adapter fixtures passed");

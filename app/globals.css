@@ -144,6 +144,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .selection-summary-preview ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
 .selection-summary-preview li { padding: 9px 0; border-bottom: 1px solid var(--line); }
 .selection-summary-preview li strong { font-size: 14px; overflow-wrap: anywhere; }
+.selection-summary-preview li small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
 .selection-summary-preview li time { display: block; color: var(--muted); font-size: 12px; }
 .article-screen h4 { margin: 18px 0 6px; font-size: 20px; line-height: 1.4; }
 .article-screen > .field-help { margin-bottom: 18px; }

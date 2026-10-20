@@ -2,6 +2,7 @@ import { normalizeArticleUrl } from "./archive/urls.mjs";
 import type { BlogArticle, BlogArticlePage, BlogAuthor, BlogGroup } from "./catalog/types";
 
 export type SelectionContent = "photos" | "blog";
+export const ALL_AUTHORS_ID = "all";
 export type SelectionRange = "latest-one" | "latest-n" | "selected" | "all";
 export type SelectedArticle = { url: string; sourcePage: number };
 export type BulkCursor = { page: number; offset: number; afterArticleId?: string };
@@ -37,7 +38,7 @@ export function validateSelection(input: unknown): SelectionRequest {
   if (value.group !== "nogizaka" && value.group !== "sakurazaka" && value.group !== "hinatazaka") {
     throw new SelectionError("グループを選択してください。");
   }
-  if (typeof value.authorId !== "string" || !/^\d{1,8}$/.test(value.authorId)) {
+  if (typeof value.authorId !== "string" || (value.authorId !== ALL_AUTHORS_ID && !/^\d{1,8}$/.test(value.authorId))) {
     throw new SelectionError("メンバーを選択してください。");
   }
   if (value.content !== "photos" && value.content !== "blog") {
@@ -88,6 +89,9 @@ export function validateSelection(input: unknown): SelectionRequest {
 
   if (value.range === "all" && value.content !== "blog") {
     throw new SelectionError("全件バックアップはブログ保存で選択してください。");
+  }
+  if (value.range === "all" && value.authorId === ALL_AUTHORS_ID) {
+    throw new SelectionError("グループ全体では全件バックアップを選べません。最新1件・最新N件・ブログ選択を利用してください。");
   }
   if (value.cursor !== undefined) throw new SelectionError("全件バックアップの続きは元のジョブから再開してください。");
 

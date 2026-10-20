@@ -1,5 +1,6 @@
 import { getArticlePage } from "@/server/catalog";
-import { isAuthorId, isBlogGroup } from "@/server/catalog/adapters";
+import { ALL_AUTHORS_ID } from "@/lib/selection";
+import { ArticleAuthorError, isAuthorId, isBlogGroup } from "@/server/catalog/adapters";
 import { checkLocalAccess } from "@/server/local-access";
 
 export const runtime = "nodejs";
@@ -8,7 +9,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ grou
   const denied = checkLocalAccess(request);
   if (denied) return denied;
   const { group, authorId } = await params;
-  if (!isBlogGroup(group) || !isAuthorId(authorId)) {
+  if (!isBlogGroup(group) || (authorId !== ALL_AUTHORS_ID && !isAuthorId(authorId))) {
     return Response.json({ error: "対象外のメンバーです。" }, { status: 404 });
   }
   const requestedPage = new URL(request.url).searchParams.get("page") ?? "1";
@@ -21,6 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ grou
     if (!articles) return Response.json({ error: "公式一覧にないメンバーです。" }, { status: 404 });
     return Response.json({ articles }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof ArticleAuthorError) return Response.json({ error: error.message }, { status: 502 });
     console.error("Failed to load blog articles", error);
     return Response.json({ error: "公式サイトのブログ一覧を取得できませんでした。少し待って再試行してください。" }, { status: 502 });
   }

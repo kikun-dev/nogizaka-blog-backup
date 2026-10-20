@@ -37,7 +37,7 @@ export function archiveArticles(
 
 export function archiveWebArticles(
   options: {
-    articles: { url: string }[];
+    articles: { url: string; author?: { id: string; name: string; type: string; group: string } }[];
     output: string;
     author?: { id: string; name: string; type: string; group: string };
     maxBytes?: number;

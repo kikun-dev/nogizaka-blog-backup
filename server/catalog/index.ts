@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page } from "playwright";
 import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
-import { articlesUrl, authorsUrl, readArticles, readAuthors } from "./adapters";
+import { ALL_AUTHORS_ID } from "@/lib/selection";
+import { articlesUrl, authorsUrl, groupArticlesUrl, readArticles, readAuthors, readGroupArticles } from "./adapters";
 import { isExpectedListingUrl } from "./listing-url";
 
 const CACHE_MS = 5 * 60 * 1000;
@@ -68,7 +69,16 @@ export function getAuthors(group: BlogGroup): Promise<BlogAuthor[]> {
   return cached(`authors:${group}`, () => withListingPage(authorsUrl(group), (page) => readAuthors(group, page)));
 }
 
+export function groupSelectionAuthor(group: BlogGroup): BlogAuthor {
+  return { id: ALL_AUTHORS_ID, name: "全件", type: "other", group, listUrl: groupArticlesUrl(group, 1) };
+}
+
 export async function getArticlePage(group: BlogGroup, authorId: string, pageNumber: number): Promise<BlogArticlePage | null> {
+  if (authorId === ALL_AUTHORS_ID) {
+    const authors = await getAuthors(group);
+    return cached(`articles:${group}:${ALL_AUTHORS_ID}:${pageNumber}`, () =>
+      withListingPage(groupArticlesUrl(group, pageNumber), (page) => readGroupArticles(group, authors, page, pageNumber)));
+  }
   const author = (await getAuthors(group)).find(({ id }) => id === authorId);
   if (!author) return null;
   return cached(`articles:${group}:${authorId}:${pageNumber}`, () =>
