@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LocalJob } from "@/server/job-store";
 import type { SelectionRequest } from "@/lib/selection";
+import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
 import { AcquisitionPlanner } from "./acquisition-planner";
 import { PhotoGallery } from "./photo-gallery";
 
@@ -13,12 +14,15 @@ const statusLabel = {
   partial: "一部を保存しました",
   failed: "保存できませんでした",
 } as const;
+const groupName = { nogizaka: "乃木坂46", sakurazaka: "櫻坂46", hinatazaka: "日向坂46" } as const;
 
 export function LocalJobForm() {
   const [view, setView] = useState<"setup" | "photos" | "blog">("setup");
   const [url, setUrl] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [readyToken, setReadyToken] = useState("");
+  const [preferencesPreview, setPreferencesPreview] = useState<LocalPreferences>(emptyPreferences);
+  const [pendingFavorite, setPendingFavorite] = useState<FavoriteAuthor | null>(null);
   const [job, setJob] = useState<LocalJob | null>(null);
   const [savedBulkJobId, setSavedBulkJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -28,6 +32,7 @@ export function LocalJobForm() {
   const resultRef = useRef<HTMLElement>(null);
   const galleryRef = useRef<HTMLDivElement>(null);
   const setupHeadingRef = useRef<HTMLHeadingElement>(null);
+  const tokenRef = useRef<HTMLInputElement>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const previousPhotoStatus = useRef<LocalJob["status"] | undefined>(undefined);
   const submittingRef = useRef(false);
@@ -44,6 +49,15 @@ export function LocalJobForm() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (readyToken) return;
+    const frame = window.requestAnimationFrame(() => {
+      try { setPreferencesPreview(parsePreferences(window.localStorage.getItem(PREFERENCES_KEY))); }
+      catch { setPreferencesPreview(emptyPreferences()); }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [readyToken]);
 
   useEffect(() => {
     if (previousView.current === view) return;
@@ -277,12 +291,24 @@ export function LocalJobForm() {
       {savedBulkJobId && readyToken && <button type="button" className="secondary-button photo-reopen" disabled={busy} onClick={() => void resumeBulkJob()}>前回の全件バックアップの結果を見る・再開する</button>}
       <div className="token-field">
         <label htmlFor="access-token">ローカルアクセストークン</label>
-        <input id="access-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => { setAccessToken(event.target.value); setReadyToken(""); }} aria-describedby="token-help" />
+        <input ref={tokenRef} id="access-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => { if (readyToken) setPendingFavorite(null); setAccessToken(event.target.value); setReadyToken(""); }} aria-describedby="token-help" />
         <p id="token-help" className="field-help">開発PCの .env.local に設定したトークンを入力してください。</p>
       </div>
 
-      {readyToken ? <AcquisitionPlanner token={readyToken} busy={busy} onSaveBlog={submitBlogJob} onSavePhotos={submitPhotoJob} />
-        : <p className="selection-start-help">トークンを入力すると取得条件を選べます。</p>}
+      {readyToken ? <AcquisitionPlanner token={readyToken} busy={busy} initialFavorite={pendingFavorite} onSaveBlog={submitBlogJob} onSavePhotos={submitPhotoJob} />
+        : <>
+          {(preferencesPreview.favorites.length > 0 || preferencesPreview.lastSelection) && <div className="saved-preferences landing-favorites">
+            {preferencesPreview.favorites.length > 0 && <><h3>お気に入りのブログ</h3>
+            <ul>{preferencesPreview.favorites.map((favorite) => <li key={favoriteKey(favorite)}>
+              <button type="button" className="favorite-shortcut" onClick={() => { setPendingFavorite(favorite); tokenRef.current?.focus(); }}><strong>{favorite.authorName}</strong><small>{groupName[favorite.group]}</small></button>
+            </li>)}</ul></>}
+            {pendingFavorite && <p className="field-help" role="status">{pendingFavorite.authorName}を選択しました。トークンを入力すると取得条件に反映します。</p>}
+            {preferencesPreview.lastSelection && <p className="field-help">前回の取得条件を保存しています。トークン入力後に確認できます。</p>}
+            <p className="field-help">このブラウザーに保存されています。共用端末では使用後に削除してください。</p>
+            <button type="button" className="text-button preferences-clear" onClick={() => { try { window.localStorage.removeItem(PREFERENCES_KEY); } catch { /* Storage may be disabled. */ } setPreferencesPreview(emptyPreferences()); setPendingFavorite(null); }}>保存した設定を削除</button>
+          </div>}
+          <p className="selection-start-help">トークンを入力すると取得条件を選べます。</p>
+        </>}
 
       <form onSubmit={submit} className="job-form direct-url-form">
         <h3>ブログの個別URLで1件保存</h3>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
+import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, serializePreferences, toggleFavorite, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
 import { paginateArticles, type ArticleCursor, type ListedArticle, type SelectionArticlePage } from "@/lib/selection-pages";
 import { ALL_AUTHORS_ID, SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest } from "@/lib/selection";
 
@@ -16,18 +17,26 @@ const rangeName = {
   all: "全件バックアップ",
 } as const;
 
-export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
+function readPreferences(): LocalPreferences {
+  try { return typeof window === "undefined" ? emptyPreferences() : parsePreferences(window.localStorage.getItem(PREFERENCES_KEY)); }
+  catch { return emptyPreferences(); }
+}
+
+export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, onSavePhotos }: {
   token: string;
   busy: boolean;
+  initialFavorite?: FavoriteAuthor | null;
   onSaveBlog: (selection: SelectionRequest) => Promise<void>;
   onSavePhotos: (selection: SelectionRequest) => Promise<void>;
 }) {
-  const [group, setGroup] = useState<BlogGroup>("nogizaka");
+  const [initialPreferences] = useState(readPreferences);
+  const [group, setGroup] = useState<BlogGroup>(initialFavorite?.group ?? initialPreferences.lastSelection?.group ?? "nogizaka");
   const [authors, setAuthors] = useState<BlogAuthor[]>([]);
-  const [authorId, setAuthorId] = useState("");
-  const [content, setContent] = useState<SelectionContent>("photos");
-  const [range, setRange] = useState<SelectionRange>("latest-one");
-  const [count, setCount] = useState("5");
+  const [loadedGroup, setLoadedGroup] = useState<BlogGroup | null>(null);
+  const [authorId, setAuthorId] = useState(initialFavorite?.authorId ?? initialPreferences.lastSelection?.authorId ?? "");
+  const [content, setContent] = useState<SelectionContent>(initialPreferences.lastSelection?.content ?? "photos");
+  const [range, setRange] = useState<SelectionRange>(initialPreferences.lastSelection?.range ?? "latest-one");
+  const [count, setCount] = useState(String(initialPreferences.lastSelection?.count ?? 5));
   const [stage, setStage] = useState<Stage>("conditions");
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSources, setPageSources] = useState<ArticleCursor[]>([{ sourcePage: 1, offset: 0 }]);
@@ -39,6 +48,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState("");
   const [retry, setRetry] = useState(0);
+  const [preferences, setPreferences] = useState<LocalPreferences>(initialPreferences);
   const confirmationVersion = useRef(0);
   const confirmationController = useRef<AbortController | null>(null);
   const limit = SELECTION_LIMITS[content];
@@ -47,6 +57,17 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   const otherAuthors = authors.filter((author) => author.type !== "member");
   const sourceCursor = pageSources[pageNumber - 1];
   const groupWide = authorId === ALL_AUTHORS_ID;
+  const selectedAuthor = authors.find((author) => author.id === authorId);
+  const authorValid = loadedGroup === group && (groupWide || Boolean(selectedAuthor));
+  const isFavorite = selectedAuthor && preferences.favorites.some((favorite) => favoriteKey(favorite) === favoriteKey({ group, authorId }));
+
+  useEffect(() => {
+    try {
+      if (preferences.favorites.length || preferences.lastSelection) {
+        window.localStorage.setItem(PREFERENCES_KEY, serializePreferences(preferences));
+      } else window.localStorage.removeItem(PREFERENCES_KEY);
+    } catch { /* Browser storage may be disabled. */ }
+  }, [preferences]);
 
   function invalidateConfirmation() {
     confirmationVersion.current += 1;
@@ -61,6 +82,8 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   useEffect(() => {
     const controller = new AbortController();
     async function loadAuthors() {
+      setLoadedGroup(null);
+      setAuthors([]);
       setLoadingAuthors(true);
       setMessage("");
       try {
@@ -71,7 +94,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
         });
         const data = await response.json() as { authors?: BlogAuthor[]; error?: string };
         if (!response.ok || !data.authors) throw new Error(data.error ?? "メンバー一覧を取得できませんでした。");
-        if (!controller.signal.aborted) setAuthors(data.authors);
+        if (!controller.signal.aborted) { setAuthors(data.authors); setLoadedGroup(group); }
       } catch (error) {
         if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "メンバー一覧を取得できませんでした。");
       } finally {
@@ -133,6 +156,34 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
     setPageSources([{ sourcePage: 1, offset: 0 }]);
     setMessage("");
     setStage("conditions");
+  }
+
+  function chooseFavorite(favorite: LocalPreferences["favorites"][number]) {
+    if (group !== favorite.group) changeGroup(favorite.group);
+    changeAuthor(favorite.authorId);
+    setStage("conditions");
+    setMessage("");
+  }
+
+  function useLastSelection() {
+    const saved = preferences.lastSelection;
+    if (!saved) return;
+    changeGroup(saved.group);
+    setAuthorId(saved.authorId);
+    setContent(saved.content);
+    setRange(saved.range);
+    setCount(String(saved.count));
+    if (saved.range === "selected") setMessage("ブログを選び直してください。記事の選択履歴は保存していません。");
+  }
+
+  function clearPreferences() {
+    invalidateConfirmation();
+    setPreferences(emptyPreferences());
+    changeGroup("nogizaka");
+    setContent("photos");
+    setRange("latest-one");
+    setCount("5");
+    setMessage("お気に入りと前回の取得条件を削除しました。");
   }
 
   function changeAuthor(value: string) {
@@ -239,6 +290,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
       if (version === confirmationVersion.current && !controller.signal.aborted) {
         setPlan(data.plan);
         setStage("conditions");
+        setPreferences((current) => ({ ...current, lastSelection: { group, authorId, content, range, count: Number(count) >= 2 && Number(count) <= SELECTION_LIMITS.photos ? Number(count) : 5 } }));
       }
     } catch (error) {
       if (version === confirmationVersion.current && !controller.signal.aborted) {
@@ -256,6 +308,21 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
   return (
     <section className="selection-flow" aria-labelledby="selection-heading">
       <h3 id="selection-heading">公式サイトから条件を選ぶ</h3>
+      {(preferences.favorites.length > 0 || preferences.lastSelection) && <div className="saved-preferences">
+        {preferences.favorites.length > 0 && <div className="saved-preferences-group">
+          <h4>お気に入り</h4>
+          <ul>{preferences.favorites.map((favorite) => <li key={favoriteKey(favorite)}>
+            <button type="button" className="favorite-shortcut" onClick={() => chooseFavorite(favorite)}><strong>{favorite.authorName}</strong><small>{groupName[favorite.group]}</small></button>
+            <button type="button" className="text-button favorite-remove" aria-label={`${favorite.authorName}をお気に入りから削除`} onClick={() => setPreferences((current) => ({ ...current, favorites: current.favorites.filter((item) => favoriteKey(item) !== favoriteKey(favorite)) }))}>削除</button>
+          </li>)}</ul>
+        </div>}
+        {preferences.lastSelection && <div className="saved-preferences-last">
+          <span>前回の条件: {groupName[preferences.lastSelection.group]}・{preferences.lastSelection.authorId === ALL_AUTHORS_ID ? "全件" : preferences.favorites.find((favorite) => favoriteKey(favorite) === favoriteKey(preferences.lastSelection!))?.authorName ?? "選択したブログ主体"}・{contentName[preferences.lastSelection.content]}・{rangeName[preferences.lastSelection.range]}</span>
+          <button type="button" className="text-button" onClick={useLastSelection}>前回の条件を使う</button>
+        </div>}
+        <button type="button" className="text-button preferences-clear" onClick={clearPreferences}>保存した設定を削除</button>
+        <p className="field-help">お気に入りと前回の条件は、このブラウザーに保存されます。共用端末では使用後に削除してください。</p>
+      </div>}
       {stage === "articles" ? (
         <div className="article-screen">
           <button type="button" className="text-button" onClick={() => { invalidateConfirmation(); setStage("conditions"); setMessage(""); }}>条件の設定に戻る</button>
@@ -312,6 +379,8 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
               {otherAuthors.length > 0 && <optgroup label="その他のブログ">{otherAuthors.map((author) => <option key={author.id} value={author.id}>{author.name}</option>)}</optgroup>}
             </select>
             {loadingAuthors && <p className="field-help" role="status">メンバー一覧を読み込んでいます…</p>}
+            {loadedGroup === group && authorId && !authorValid && <p className="form-message" role="alert">保存したブログ主体は現在の公式一覧にありません。別の主体を選んでください。</p>}
+            {selectedAuthor && <button type="button" className="text-button favorite-toggle" onClick={() => setPreferences((current) => ({ ...current, favorites: toggleFavorite(current.favorites, selectedAuthor) }))}>{isFavorite ? "★ お気に入りから外す" : "☆ お気に入りに追加"}</button>}
           </div>
           <fieldset className="selection-fieldset">
             <legend>何を保存する？</legend>
@@ -324,7 +393,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "latest-n"} onChange={() => changeRange("latest-n")} /><span><strong>最新N件</strong><small>最大{limit}件まで</small></span></label>
             {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">ブログの件数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>ブログを選ぶ</strong><small>ページを跨いで{limit}件まで</small></span></label>
-            {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorId} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
+            {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorValid} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog" || groupWide} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{groupWide ? "グループ全体では選べません" : content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
             {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
               <strong>全件バックアップについて</strong>
@@ -334,7 +403,7 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             </div>}
           </fieldset>
           {message && <div role="alert" className="catalog-error"><p className="form-message">{message}</p>{authors.length === 0 && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>一覧を再読み込み</button>}</div>}
-          {range !== "selected" && <button type="button" className="primary-button selection-confirm" disabled={!authorId || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "この条件を確認"}</button>}
+          {range !== "selected" && <button type="button" className="primary-button selection-confirm" disabled={!authorValid || confirming} onClick={() => void confirm()}>{confirming ? "確認中…" : "この条件を確認"}</button>}
           {plan && (
             <div className="selection-summary" role="status">
               <strong>取得条件を確認しました</strong>

@@ -110,6 +110,21 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .selection-start-help { margin: 24px 0; color: var(--muted); font-size: 14px; }
 .selection-flow { margin: 27px 0 0; padding-top: 25px; border-top: 1px solid var(--line); }
 .selection-flow h3 { margin: 0 0 16px; font-size: 18px; line-height: 1.4; }
+.saved-preferences { margin: 0 0 25px; padding: 17px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.saved-preferences h4 { margin: 0 0 10px; font-size: 15px; }
+.saved-preferences ul { display: flex; flex-wrap: wrap; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.saved-preferences li { display: flex; align-items: center; gap: 6px; padding: 3px 9px 3px 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.favorite-shortcut { display: flex; align-items: baseline; gap: 7px; min-height: 38px; padding: 6px 8px; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.favorite-shortcut:hover { color: var(--primary); }
+.favorite-shortcut small { color: var(--muted); font-size: 11px; }
+.favorite-remove { font-size: 12px; }
+.saved-preferences-last { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 15px; margin-top: 13px; font-size: 13px; }
+.saved-preferences-last:first-child { margin-top: 0; }
+.preferences-clear { margin-top: 12px; font-size: 12px; }
+.saved-preferences .field-help { margin-top: 8px; }
+.favorite-toggle { margin-top: 9px; }
+.landing-favorites { margin: 20px 0 0; }
+.landing-favorites h3 { margin: 0 0 10px; font-size: 16px; }
 .selection-field { margin: 0 0 18px; }
 .selection-field select { width: 100%; appearance: auto; }
 .selection-fieldset { min-width: 0; margin: 28px 0 0; padding: 15px 0 0; border: 0; border-top: 1px solid var(--line); }
