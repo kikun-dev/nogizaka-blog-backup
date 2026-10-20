@@ -16,7 +16,8 @@ export type PhotoArticle = {
   error?: string;
 };
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed";
+export type JobStatus = "queued" | "running" | "succeeded" | "partial" | "failed";
+export type ArticleResult = { id: string; title: string; date: string; status: "succeeded" | "failed"; message?: string };
 
 export type LocalJob = {
   id: string;
@@ -37,6 +38,10 @@ export type LocalJob = {
   outputBytes?: number;
   photoArticles?: PhotoArticle[];
   photoZipReady?: boolean;
+  articleResults?: ArticleResult[];
+  currentArticle?: { title: string; date: string };
+  retryOfJobId?: string;
+  retriedByJobId?: string;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
@@ -46,7 +51,7 @@ export type LocalJob = {
 };
 
 export interface JobStore {
-  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase" | "priorPartIds">): Promise<LocalJob>;
+  create(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase" | "priorPartIds" | "retryOfJobId">): Promise<LocalJob>;
   get(id: string): Promise<LocalJob | null>;
   update(id: string, change: Partial<LocalJob>): Promise<LocalJob>;
   failInterrupted(): Promise<void>;
@@ -92,7 +97,7 @@ export const localJobStore: JobStore = {
     if (!destination) return null;
     try {
       const job = JSON.parse(await readFile(destination, "utf8")) as LocalJob;
-      if (job.status === "succeeded") delete job.error;
+      if (job.status === "succeeded" || job.status === "partial") delete job.error;
       return job;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -102,14 +107,14 @@ export const localJobStore: JobStore = {
   async update(id, change) {
     const current = await this.get(id);
     if (!current) throw new Error("Job not found");
-    if (current.status === "succeeded" && change.status === "failed") return current;
+    if ((current.status === "succeeded" || current.status === "partial") && change.status === "failed") return current;
     const updated: LocalJob = {
       ...current,
       ...change,
       id: current.id,
       updatedAt: new Date().toISOString(),
     };
-    if (updated.status === "succeeded") delete updated.error;
+    if (updated.status === "succeeded" || updated.status === "partial") delete updated.error;
     await save(updated);
     return updated;
   },

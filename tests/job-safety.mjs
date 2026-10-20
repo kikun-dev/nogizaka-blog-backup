@@ -8,6 +8,7 @@ import { test } from "node:test";
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "./job-store") return nextResolve("./job-store.ts", context);
+    if (specifier === "@/lib/selection") return nextResolve("../lib/selection.ts", context);
     return nextResolve(specifier, context);
   },
 });
@@ -21,6 +22,105 @@ test("module reload keeps the active runner", async () => {
   const first = (await import("../server/job-runner.ts")).localJobRunner;
   const reloaded = (await import("../server/job-runner.ts?reload-test")).localJobRunner;
   assert.equal(reloaded, first);
+});
+
+test("module reload replaces a runner from an older implementation", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  try {
+    globalThis.sakamichiLocalJobRunner = { oldImplementation: true };
+    globalThis.sakamichiLocalJobRunnerVersion = 1;
+    const upgraded = (await import("../server/job-runner.ts?upgrade-test")).localJobRunner;
+    assert.notEqual(upgraded, globalRunner);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 4);
+    assert.equal(typeof upgraded.submitPhotos, "function");
+  } finally {
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+  }
+});
+
+test("module reload keeps a busy old runner until its work finishes", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  const globalSelector = globalThis.selectSakamichiRunner;
+  let oldInitializations = 0;
+  const busy = { running: 1, waiting: [], activeKeys: new Map(),
+    async initialize() { oldInitializations++; } };
+  try {
+    globalThis.sakamichiLocalJobRunner = busy;
+    globalThis.sakamichiLocalJobRunnerVersion = 2;
+    const facade = (await import("../server/job-runner.ts?busy-upgrade-test")).localJobRunner;
+    assert.equal(globalThis.sakamichiLocalJobRunner, busy);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 2);
+    await facade.initialize();
+    assert.equal(oldInitializations, 1);
+    assert.equal(globalThis.sakamichiLocalJobRunner, busy);
+
+    busy.running = 0;
+    globalThis.selectSakamichiRunner();
+    assert.notEqual(globalThis.sakamichiLocalJobRunner, busy);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 4);
+  } finally {
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+    globalThis.selectSakamichiRunner = globalSelector;
+  }
+});
+
+test("reload during initialization cannot replace a runner that may still enqueue work", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  const globalSelector = globalThis.selectSakamichiRunner;
+  let releaseInitialization;
+  const initialization = new Promise((resolve) => { releaseInitialization = resolve; });
+  const job = { id: "backup-during-init", fullBackup: true, status: "failed", articleUrl: "https://example.com" };
+  const store = {
+    async failInterrupted() { await initialization; },
+    async get() { return { ...job }; },
+    async update(_id, change) { Object.assign(job, change); return { ...job }; },
+  };
+  const runner = new LocalJobRunner(store, async () => {});
+  try {
+    globalThis.sakamichiLocalJobRunner = runner;
+    globalThis.sakamichiLocalJobRunnerVersion = 3;
+    const resuming = runner.resumeFullBackup(job.id);
+    assert.equal(runner.pendingInitializations, 1);
+    assert.equal(runner.resuming.has(job.id), true);
+    await import("../server/job-runner.ts?initialization-race-test");
+    assert.equal(globalThis.sakamichiLocalJobRunner, runner);
+    releaseInitialization();
+    assert.equal((await resuming).status, "queued");
+    await new Promise((resolve) => setImmediate(resolve));
+    globalThis.selectSakamichiRunner();
+    assert.notEqual(globalThis.sakamichiLocalJobRunner, runner);
+    assert.equal(globalThis.sakamichiLocalJobRunnerVersion, 4);
+  } finally {
+    releaseInitialization();
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+    globalThis.selectSakamichiRunner = globalSelector;
+  }
+});
+
+test("an initialized legacy runner is kept when pending callers cannot be inspected", async () => {
+  const globalRunner = globalThis.sakamichiLocalJobRunner;
+  const globalVersion = globalThis.sakamichiLocalJobRunnerVersion;
+  const globalSelector = globalThis.selectSakamichiRunner;
+  const legacy = { initialization: Promise.resolve(), running: 0, waiting: [], activeKeys: new Map() };
+  try {
+    globalThis.sakamichiLocalJobRunner = legacy;
+    globalThis.sakamichiLocalJobRunnerVersion = 3;
+    await import("../server/job-runner.ts?legacy-initialization-test");
+    assert.equal(globalThis.sakamichiLocalJobRunner, legacy);
+    await legacy.initialization;
+    globalThis.selectSakamichiRunner();
+    assert.equal(globalThis.sakamichiLocalJobRunner, legacy);
+  } finally {
+    globalThis.sakamichiLocalJobRunner = globalRunner;
+    globalThis.sakamichiLocalJobRunnerVersion = globalVersion;
+    globalThis.selectSakamichiRunner = globalSelector;
+  }
 });
 
 test("job API requires a configured matching bearer token", () => {
@@ -54,10 +154,10 @@ test("runner executes one job and bounds its waiting queue", async () => {
     started.push(job.id);
     await new Promise((resolve) => releases.push(resolve));
   });
-  const accepted = await Promise.all(Array.from({ length: 11 }, () => runner.submit("https://example.com")));
+  const accepted = await Promise.all(Array.from({ length: 11 }, (_, index) => runner.submit(`https://www.nogizaka46.com/s/n46/diary/detail/${index + 1}`)));
   assert.equal(accepted.filter(Boolean).length, 11);
   assert.equal(started.length, 1);
-  assert.equal(await runner.submit("https://example.com"), null);
+  assert.equal(await runner.submit("https://www.nogizaka46.com/s/n46/diary/detail/100"), null);
   releases.shift()();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(started.length, 2);
@@ -132,7 +232,7 @@ async function runLimitedBackup(articleLimit, byteLimit, pageOverrides) {
     },
   };
   const author = { id: "123", name: "テスト", group: "nogizaka", type: "member" };
-  const articles = [1, 2, 3].map((id) => ({ id: String(id), url: `https://example.com/${id}`, author }));
+  const articles = [1, 2, 3].map((id) => ({ id: String(id), url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, author }));
   const pages = pageOverrides ?? { 1: { items: articles, page: 1, hasNext: false } };
   const services = {
     ArchiveOutputLimitError,
@@ -199,7 +299,7 @@ test("byte limit packages completed blogs and leaves the oversized blog for the 
 test("an uncertain empty listing fails after saved articles and can resume", async () => {
   const author = { id: "123", name: "テスト", group: "nogizaka", type: "member" };
   const articles = Array.from({ length: 11 }, (_, index) => ({
-    id: String(index + 1), url: `https://example.com/${index + 1}`, author,
+    id: String(index + 1), url: `https://www.nogizaka46.com/s/n46/diary/detail/${index + 1}`, author,
   }));
   const pages = { 1: { items: articles.slice(0, 10), page: 1, hasNext: true }, 2: null };
   const { runner, first, completed, zipContents } = await runLimitedBackup(20, 1000, pages);
@@ -224,4 +324,172 @@ test("a deleted cursor article is recovered across ZIP parts without duplicates"
   assert.equal(finished.status, "succeeded");
   assert.equal(finished.savedCount, 1);
   assert.deepEqual(zipContents.get(finished.outputDirectory), ["dir/3"]);
+});
+
+test("deduplication separates groups sharing an article ID and normalizes equivalent URLs", async () => {
+  const jobs = new Map();
+  const releases = [];
+  let nextId = 0;
+  const store = {
+    async failInterrupted() {},
+    async create(articleUrl, options) {
+      const job = { id: `job-${++nextId}`, articleUrl, ...options };
+      jobs.set(job.id, job);
+      return job;
+    },
+    async get(id) { return jobs.get(id) ?? null; },
+  };
+  const runner = new LocalJobRunner(store, async () => {
+    await new Promise((resolve) => releases.push(resolve));
+  });
+  const nogizaka = { id: "42", url: "https://www.nogizaka46.com/s/n46/diary/detail/42?cd=MEMBER",
+    title: "乃木坂の記事", date: "2026-10-21",
+    author: { id: "member-a", name: "A", type: "member", group: "nogizaka" } };
+  const sakurazaka = { id: "42", url: "https://sakurazaka46.com/s/s46/diary/detail/42?cd=blog",
+    title: "櫻坂の記事", date: "2026-10-21",
+    author: { id: "member-b", name: "B", type: "member", group: "sakurazaka" } };
+  const [first, equivalent, otherGroup] = await Promise.all([
+    runner.submitPhotos([nogizaka]),
+    runner.submitPhotos([{ ...nogizaka, url: `${nogizaka.url}&ima=9` }]),
+    runner.submitPhotos([sakurazaka]),
+  ]);
+  assert.equal(equivalent.id, first.id);
+  assert.notEqual(otherGroup.id, first.id);
+  assert.equal(nextId, 2);
+  while (releases.length) {
+    releases.shift()();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+});
+
+test("partial blog job keeps successful ZIP, retries only failures, and deduplicates starts", async () => {
+  const jobs = new Map();
+  let nextId = 0;
+  const archived = [];
+  const zipped = [];
+  const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
+  const articles = ["1", "2", "3"].map((id) => ({ id, url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
+  const store = {
+    async failInterrupted() {},
+    async create(articleUrl, options) {
+      const job = { id: `job-${++nextId}`, articleUrl, ...options, status: "queued", outputDirectory: `job-${nextId}`, log: [] };
+      jobs.set(job.id, job);
+      return { ...job };
+    },
+    async get(id) { return jobs.has(id) ? { ...jobs.get(id) } : null; },
+    async update(id, change) {
+      const job = { ...jobs.get(id), ...change };
+      jobs.set(id, job);
+      return { ...job };
+    },
+  };
+  const jobServices = {
+    async archiveWebArticles({ articles: batch }, { onStart, onFailure, onProgress, continueOnError }) {
+      assert.equal(continueOnError, true);
+      archived.push(batch.map(({ id }) => id));
+      const saved = [];
+      for (const [index, article] of batch.entries()) {
+        await onStart(article, index);
+        if (article.id === "2" && archived.length === 1) {
+          await onFailure(article, new Error("private stack detail"));
+          continue;
+        }
+        const record = { directory: `dir/${article.id}`, metadata: article };
+        saved.push(record);
+        await onProgress(saved.length, saved.length * 10, record);
+      }
+      return { saved, totalBytes: saved.length * 10 };
+    },
+    async createBlogZip(_directory, directories) { zipped.push(directories); },
+    async acquirePhotos() { throw new Error("unexpected photos"); },
+    async createPhotoZip() { throw new Error("unexpected photos ZIP"); },
+  };
+  const runner = new LocalJobRunner(store, undefined, { jobServices });
+  const [first, duplicate] = await Promise.all([
+    runner.submitBlogs(articles, author), runner.submitBlogs(articles, author),
+  ]);
+  assert.equal(duplicate.id, first.id);
+  async function completed(id) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const job = await store.get(id);
+      if (["succeeded", "partial", "failed"].includes(job.status)) return job;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error("job did not finish");
+  }
+  const partial = await completed(first.id);
+  assert.equal(partial.status, "partial");
+  assert.equal(partial.savedCount, 2);
+  assert.deepEqual(partial.articleResults.map(({ status }) => status), ["succeeded", "failed", "succeeded"]);
+  assert.doesNotMatch(JSON.stringify(partial), /private stack detail/);
+  assert.deepEqual(zipped[0], ["dir/1", "dir/3"]);
+  const [retry, duplicateRetry] = await Promise.all([runner.retryFailed(first.id), runner.retryFailed(first.id)]);
+  assert.equal(duplicateRetry.id, retry.id);
+  const recovered = await completed(retry.id);
+  assert.equal(recovered.status, "succeeded");
+  assert.deepEqual(archived, [["1", "2", "3"], ["2"]]);
+  assert.deepEqual(zipped[1], ["dir/2"]);
+});
+
+test("photo job treats zero images as success and retries an article with failed images", async () => {
+  const jobs = new Map();
+  let nextId = 0;
+  const calls = [];
+  const progress = [];
+  const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
+  const articles = ["1", "2"].map((id) => ({ id, url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
+  const store = {
+    async failInterrupted() {},
+    async create(articleUrl, options) {
+      const job = { id: `photo-${++nextId}`, articleUrl, ...options, status: "queued", outputDirectory: `photo-${nextId}`, log: [] };
+      jobs.set(job.id, job);
+      return { ...job };
+    },
+    async get(id) { return jobs.has(id) ? { ...jobs.get(id) } : null; },
+    async update(id, change) {
+      const job = { ...jobs.get(id), ...change };
+      jobs.set(id, job);
+      if (change.articleResults) progress.push({ completed: change.articleResults.length, current: change.currentArticle?.title });
+      return { ...job };
+    },
+  };
+  const jobServices = {
+    async acquirePhotos(batch, _output, onProgress) {
+      calls.push(batch.map(({ id }) => id));
+      const results = [];
+      for (const article of batch) {
+        await onProgress([...results], article);
+        results.push({ id: article.id, title: article.title, date: article.date, authorName: author.name,
+          photos: article.id === "2" ? [{ name: "1.jpg", mimeType: "image/jpeg" }] : [],
+          detected: article.id === "2" ? 2 : 0, failed: article.id === "2" && calls.length === 1 ? 1 : 0 });
+        await onProgress([...results]);
+      }
+      return results;
+    },
+    async createPhotoZip() { return true; },
+    async archiveWebArticles() { throw new Error("unexpected blogs"); },
+    async createBlogZip() { throw new Error("unexpected blog ZIP"); },
+  };
+  const runner = new LocalJobRunner(store, undefined, { jobServices });
+  const first = await runner.submitPhotos(articles);
+  async function completed(id) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const job = await store.get(id);
+      if (["succeeded", "partial", "failed"].includes(job.status)) return job;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error("job did not finish");
+  }
+  const partial = await completed(first.id);
+  assert.equal(partial.status, "partial");
+  assert.deepEqual(partial.articleResults.map(({ status }) => status), ["succeeded", "failed"]);
+  assert.deepEqual(progress.slice(0, 4), [
+    { completed: 0, current: "記事1" },
+    { completed: 1, current: undefined },
+    { completed: 1, current: "記事2" },
+    { completed: 2, current: undefined },
+  ]);
+  const retry = await runner.retryFailed(first.id);
+  assert.equal((await completed(retry.id)).status, "succeeded");
+  assert.deepEqual(calls, [["1", "2"], ["2"]]);
 });

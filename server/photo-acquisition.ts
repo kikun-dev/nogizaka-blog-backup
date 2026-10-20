@@ -135,11 +135,12 @@ export async function savePhotoSource(
   }
 }
 
-export async function acquirePhotos(articles: BlogArticle[], outputDirectory: string): Promise<PhotoArticle[]> {
+export async function acquirePhotos(articles: BlogArticle[], outputDirectory: string, onProgress?: (results: PhotoArticle[], current?: BlogArticle) => Promise<void>): Promise<PhotoArticle[]> {
   const browser = await chromium.launch({ headless: true });
   const results: PhotoArticle[] = [];
   try {
     for (const article of articles) {
+      await onProgress?.([...results], article);
       const context = await browser.newContext({ locale: "ja-JP" });
       const result: PhotoArticle = {
         id: article.id, title: article.title, date: article.date, authorName: article.author.name,
@@ -184,9 +185,11 @@ export async function acquirePhotos(articles: BlogArticle[], outputDirectory: st
         }
         result.failed += Math.max(0, candidates.length - MAX_PHOTOS_PER_ARTICLE);
       } catch (error) {
-        result.error = error instanceof Error ? error.message : "ブログ本文を取得できませんでした。";
+        console.error("Failed to acquire article photos", { articleId: article.id, error });
+        result.error = "このブログの写真を取得できませんでした。";
       } finally {
         await context.close();
+        await onProgress?.([...results]);
       }
     }
     return results;

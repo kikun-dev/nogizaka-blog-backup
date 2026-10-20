@@ -10,6 +10,7 @@ const statusLabel = {
   queued: "開始待ち",
   running: "保存中",
   succeeded: "保存しました",
+  partial: "一部を保存しました",
   failed: "保存できませんでした",
 } as const;
 
@@ -29,6 +30,7 @@ export function LocalJobForm() {
   const setupHeadingRef = useRef<HTMLHeadingElement>(null);
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const previousPhotoStatus = useRef<LocalJob["status"] | undefined>(undefined);
+  const submittingRef = useRef(false);
   const activeJobId = job?.id;
   const activeStatus = job?.status;
   const busy = submitting || activeStatus === "queued" || activeStatus === "running";
@@ -60,7 +62,7 @@ export function LocalJobForm() {
     const status = job?.kind === "photos" ? job.status : undefined;
     let frame: number | undefined;
     if (view === "photos" && job?.kind === "photos" && job.photoArticles
-      && (status === "succeeded" || status === "failed") && previousPhotoStatus.current !== status) {
+      && (status === "succeeded" || status === "partial" || status === "failed") && previousPhotoStatus.current !== status) {
       frame = window.requestAnimationFrame(() => galleryRef.current?.scrollIntoView({ block: "start", behavior: "auto" }));
     }
     previousPhotoStatus.current = status;
@@ -93,12 +95,13 @@ export function LocalJobForm() {
   }, [activeJobId, activeStatus, accessToken]);
 
   async function submitJob(articleUrl: string) {
-    if (busy) return;
+    if (busy || submittingRef.current) return;
     if (!accessToken) {
       setMessage("ローカルアクセストークンを入力してください。");
       return;
     }
     setUrl(articleUrl);
+    submittingRef.current = true;
     setView("blog");
     setSubmitting(true);
     setMessage("");
@@ -115,12 +118,14 @@ export function LocalJobForm() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "開始できませんでした。");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
   async function submitBlogJob(selection: SelectionRequest) {
-    if (busy) return;
+    if (busy || submittingRef.current) return;
+    submittingRef.current = true;
     setView("blog");
     setSubmitting(true);
     setMessage("");
@@ -140,7 +145,7 @@ export function LocalJobForm() {
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "ブログの保存を開始できませんでした。");
-    } finally { setSubmitting(false); }
+    } finally { submittingRef.current = false; setSubmitting(false); }
   }
 
   async function resumeBulkJob() {
@@ -195,7 +200,8 @@ export function LocalJobForm() {
   }
 
   async function submitPhotoJob(selection: SelectionRequest) {
-    if (busy) return;
+    if (busy || submittingRef.current) return;
+    submittingRef.current = true;
     setView("photos");
     setSubmitting(true);
     setMessage("");
@@ -211,7 +217,39 @@ export function LocalJobForm() {
       setJob(data.job);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "写真の取得を開始できませんでした。");
-    } finally { setSubmitting(false); }
+    } finally { submittingRef.current = false; setSubmitting(false); }
+  }
+
+  async function retryFailedArticles() {
+    if (!job || busy || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setMessage("");
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/retry`, {
+        method: "POST", headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json() as { job?: LocalJob; error?: string };
+      if (!response.ok || !data.job) throw new Error(data.error ?? "再試行を開始できませんでした。");
+      setJob(data.job);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "再試行を開始できませんでした。");
+    } finally { submittingRef.current = false; setSubmitting(false); }
+  }
+
+  async function showOriginalJob() {
+    if (!job?.retryOfJobId) return;
+    try {
+      const response = await fetch(`/api/jobs/${job.retryOfJobId}`, {
+        cache: "no-store", headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json() as { job?: LocalJob };
+      if (!response.ok || !data.job) throw new Error("元の結果を読み込めませんでした。");
+      setJob(data.job);
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "元の結果を読み込めませんでした。");
+    }
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -262,9 +300,19 @@ export function LocalJobForm() {
         <button type="button" className="secondary-button" onClick={() => setView("setup")}>条件設定に戻る</button>
         <span className="phase-badge">{view === "photos" ? "写真のみ" : "ブログ"}</span>
       </div>
-      <h2 ref={resultHeadingRef} id="result-title" tabIndex={-1} aria-live="polite">{view === "photos" ? job?.kind === "photos" && job.status === "succeeded" ? "取得した写真" : "写真の取得結果" : "ブログの保存結果"}</h2>
+      <h2 ref={resultHeadingRef} id="result-title" tabIndex={-1} aria-live="polite">{view === "photos" ? job?.kind === "photos" && (job.status === "succeeded" || job.status === "partial") ? "取得した写真" : "写真の取得結果" : "ブログの保存結果"}</h2>
       {submitting && <p className="photo-screen-message" role="status">{view === "photos" ? "写真の取得" : "ブログの保存"}を開始しています…</p>}
       {message && <p className="form-message" role="alert">{message}</p>}
+      {job && !job.fullBackup && <div className="job-progress" aria-live="polite">
+        <p>進捗: {job.articleResults?.length ?? 0} / {job.requestedArticles?.length ?? 1} 件</p>
+        {job.currentArticle && <p>処理中: {job.currentArticle.title}（{job.currentArticle.date || "投稿日不明"}）</p>}
+        <p>成功 {job.articleResults?.filter((article) => article.status === "succeeded").length ?? 0} 件 / 失敗 {job.articleResults?.filter((article) => article.status === "failed").length ?? 0} 件</p>
+        {!!job.retryOfJobId && <p>失敗した記事の再試行結果です。元のジョブで保存した記事は再取得していません。 <button type="button" className="secondary-button" onClick={() => void showOriginalJob()}>元の結果を見る</button></p>}
+        {!!job.articleResults?.some((article) => article.status === "failed") && <>
+          <ul>{job.articleResults.filter((article) => article.status === "failed").map((article) => <li key={article.id}>{article.title}（{article.date || "投稿日不明"}）: {article.message}</li>)}</ul>
+          {(job.status === "partial" || job.status === "failed") && <button type="button" className="secondary-button" disabled={busy} onClick={() => void retryFailedArticles()}>失敗した記事だけ再試行</button>}
+        </>}
+      </div>}
       {view === "blog" && job?.kind === "blog" && <div className="job-result" aria-live="polite">
         <div className="job-result-top"><strong>{statusLabel[job.status]}</strong><span className={`status-dot status-${job.status}`} aria-hidden="true" /></div>
         {job.fullBackup && !!job.priorPartIds?.length && <div className="backup-parts">
@@ -274,9 +322,10 @@ export function LocalJobForm() {
         {(job.status === "queued" || job.status === "running") && <p>{job.fullBackup
           ? job.backupPhase === "packaging" ? `保存済み${job.savedCount ?? 0}件。1つのZIPを作成中です。` : `保存済み${job.savedCount ?? 0}件。公式一覧の最後まで自動で取得します。`
           : `保存済み ${job.savedCount ?? 0} / ${job.requestedArticles?.length ?? 1} 件。完了すると ZIP をダウンロードできます。`}</p>}
-        {job.status === "succeeded" && <>
+        {job.fullBackup && job.currentArticle && <p>処理中: {job.currentArticle.title}（{job.currentArticle.date || "投稿日不明"}）</p>}
+        {(job.status === "succeeded" || job.status === "partial") && <>
           <p>{job.savedCount ?? 1}件のブログを保存しました。</p>
-          <a className="primary-button" href={`/api/blog-jobs/${job.id}/zip`}>{job.fullBackup && job.backupStopReason ? `今回の${job.savedCount ?? 0}件をZIPで保存` : "PDF・MHTMLをZIPで保存"}</a>
+          {job.blogZipReady && <a className="primary-button" href={`/api/blog-jobs/${job.id}/zip`}>{job.fullBackup && job.backupStopReason ? `今回の${job.savedCount ?? 0}件をZIPで保存` : "PDF・MHTMLをZIPで保存"}</a>}
           {job.fullBackup &&
             <p className="field-help">4 GB以上のZIPはWindows標準の「すべて展開」でエラーになる場合があります。ダウンロード後は7-ZipなどZIP64対応アプリで展開してください。</p>}
           <p className="field-help">ZIP内はメンバー別・ブログ別フォルダです。各ブログに metadata.json を含みます。</p>

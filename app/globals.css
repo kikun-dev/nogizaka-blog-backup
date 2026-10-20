@@ -174,7 +174,14 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; background: oklch(0.7 0.02 260); }
 .status-running { background: var(--primary); animation: pulse 1.4s ease-in-out infinite; }
 .status-succeeded { background: oklch(0.56 0.13 150); }
+.status-partial { background: oklch(0.67 0.13 75); }
 .status-failed { background: oklch(0.56 0.16 25); }
+.job-progress { margin-top: 18px; padding: 15px 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 14px; }
+.job-progress p { margin: 0 0 7px; }
+.job-progress p:last-child { margin-bottom: 0; }
+.job-progress ul { margin: 10px 0; padding-left: 20px; }
+.job-progress li { margin-bottom: 5px; overflow-wrap: anywhere; }
+.job-progress .secondary-button { margin-top: 8px; }
 .job-result p { margin: 12px 0 0; overflow-wrap: anywhere; }
 .job-result code { font-size: 13px; }
 .job-result details { margin-top: 12px; }

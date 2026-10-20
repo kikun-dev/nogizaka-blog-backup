@@ -43,7 +43,13 @@ export function archiveWebArticles(
     maxBytes?: number;
     cacheResults?: boolean;
   },
-  dependencies?: { logger?: ArchiveLogger; onProgress?: (count: number, bytes: number, saved: { directory: string; metadata: { id: string } }) => Promise<void> },
+  dependencies?: {
+    logger?: ArchiveLogger;
+    continueOnError?: boolean;
+    onStart?: (article: { url: string; id?: string; title?: string; date?: string }, index: number) => Promise<void>;
+    onFailure?: (article: { url: string; id?: string; title?: string; date?: string }, error: unknown) => Promise<void>;
+    onProgress?: (count: number, bytes: number, saved: { directory: string; metadata: { id: string; title: string; date: string } }) => Promise<void>;
+  },
 ): Promise<{
   saved: { directory: string; metadata: { id: string; title: string; date: string; url: string } }[];
   totalBytes: number;
