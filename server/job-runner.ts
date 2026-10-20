@@ -200,6 +200,12 @@ export class LocalJobRunner implements JobRunner {
     const articleLimit = this.backupOptions?.articleLimit ?? MAX_BACKUP_ARTICLES;
     const byteLimit = this.backupOptions?.byteLimit ?? MAX_BACKUP_BYTES;
     let job = (await this.store.get(initial.id)) ?? initial;
+    const processed = new Set(job.processedArticleIds ?? []);
+    for (const id of job.priorPartIds ?? []) {
+      const prior = await this.store.get(id);
+      if (!prior || prior.status !== "succeeded") throw new Error("前のパートの保存情報を確認できませんでした。");
+      for (const articleId of prior.processedArticleIds ?? []) processed.add(articleId);
+    }
     const log = [...job.log].slice(-80);
     const logger = {
       log: (line: string) => { log.push(line); if (log.length > 80) log.shift(); },
@@ -213,9 +219,11 @@ export class LocalJobRunner implements JobRunner {
         let probe = cursor;
         let next: BulkCursor | undefined;
         for (;;) {
-          const batch = await collectBulkBatch(loadPage, probe);
-          const index = batch.articles.findIndex((article) => !(job.processedArticleIds ?? []).includes(article.id));
-          if (index >= 0) { next = batch.positions[index]; break; }
+          const batch = await collectBulkBatch(loadPage, probe, 10, processed);
+          if (batch.articles.length) {
+            next = { ...batch.positions[0], afterArticleId: job.processedArticleIds?.at(-1) ?? probe.afterArticleId };
+            break;
+          }
           if (!batch.nextCursor) break;
           probe = batch.nextCursor;
         }
@@ -227,14 +235,14 @@ export class LocalJobRunner implements JobRunner {
       const batch = await collectBulkBatch(
         loadPage, cursor,
         Math.min(10, articleLimit - (job.savedCount ?? 0)),
+        processed,
       );
       if (!batch.articles.length) {
         if (!job.savedCount) throw new Error("保存するブログが見つかりませんでした。");
         job = await this.store.update(job.id, { backupPhase: "packaging", nextCursor: undefined, backupStopReason: undefined });
         break;
       }
-      const processed = new Set(job.processedArticleIds ?? []);
-      const remaining = batch.articles.filter((article) => !processed.has(article.id));
+      const remaining = batch.articles;
       let previousBytes = 0;
       if (remaining.length) {
         try {
@@ -252,16 +260,17 @@ export class LocalJobRunner implements JobRunner {
                 processedArticleIds: [...(job.processedArticleIds ?? []), saved.metadata.id],
                 log: [...log],
               });
+              processed.add(saved.metadata.id);
               previousBytes = bytes;
             },
           });
         } catch (error) {
           if (!(error instanceof ArchiveOutputLimitError) || !job.savedCount) throw error;
-          const index = batch.articles.findIndex((article) => !(job.processedArticleIds ?? []).includes(article.id));
+          const index = batch.articles.findIndex((article) => !processed.has(article.id));
           if (index < 0) throw error;
           logger.log("容量上限に達したため、ここまでのブログをZIPにまとめます。");
           job = await this.store.update(job.id, { backupPhase: "packaging", backupStopReason: "size-limit",
-            nextCursor: batch.positions[index], log: [...log] });
+            nextCursor: { ...batch.positions[index], afterArticleId: job.processedArticleIds?.at(-1) ?? cursor.afterArticleId }, log: [...log] });
           break;
         }
       }

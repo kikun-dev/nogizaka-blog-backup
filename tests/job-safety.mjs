@@ -112,7 +112,7 @@ test("failed full backup resumes the same job and preserves progress", async () 
   assert.equal(started.length, 1);
 });
 
-async function runLimitedBackup(articleLimit, byteLimit) {
+async function runLimitedBackup(articleLimit, byteLimit, pageOverrides) {
   const jobs = new Map();
   const zipContents = new Map();
   let nextId = 0;
@@ -133,11 +133,12 @@ async function runLimitedBackup(articleLimit, byteLimit) {
   };
   const author = { id: "123", name: "テスト", group: "nogizaka", type: "member" };
   const articles = [1, 2, 3].map((id) => ({ id: String(id), url: `https://example.com/${id}`, author }));
+  const pages = pageOverrides ?? { 1: { items: articles, page: 1, hasNext: false } };
   const services = {
     ArchiveOutputLimitError,
     collectBulkBatch,
     async getArticlePage(_group, _authorId, page) {
-      return page === 1 ? { items: articles, page: 1, hasNext: false } : null;
+      return pages[page] ?? null;
     },
     async archiveWebArticles({ articles: batch, maxBytes }, { onProgress }) {
       const saved = [];
@@ -165,8 +166,8 @@ async function runLimitedBackup(articleLimit, byteLimit) {
     }
     throw new Error("job did not finish");
   }
-  const first = await runner.submitFullBackup(author, articles[0].url);
-  return { runner, first: await completed(first.id), completed, zipContents };
+  const first = await runner.submitFullBackup(author, pages[1].items[0].url);
+  return { runner, first: await completed(first.id), completed, zipContents, pages };
 }
 
 test("article limit packages a ZIP and continues from the first unarchived blog", async () => {
@@ -174,7 +175,7 @@ test("article limit packages a ZIP and continues from the first unarchived blog"
   assert.equal(first.status, "succeeded");
   assert.equal(first.savedCount, 2);
   assert.equal(first.backupStopReason, "article-limit");
-  assert.deepEqual(first.nextCursor, { page: 1, offset: 2 });
+  assert.deepEqual(first.nextCursor, { page: 1, offset: 2, afterArticleId: "2" });
   assert.deepEqual(zipContents.get(first.outputDirectory), ["dir/1", "dir/2"]);
   const next = await runner.continueFullBackup(first.id);
   const finished = await completed(next.id);
@@ -191,6 +192,36 @@ test("byte limit packages completed blogs and leaves the oversized blog for the 
   assert.equal(first.status, "succeeded");
   assert.equal(first.savedCount, 1);
   assert.equal(first.backupStopReason, "size-limit");
-  assert.deepEqual(first.nextCursor, { page: 1, offset: 1 });
+  assert.deepEqual(first.nextCursor, { page: 1, offset: 1, afterArticleId: "1" });
   assert.deepEqual(zipContents.get(first.outputDirectory), ["dir/1"]);
+});
+
+test("an uncertain empty listing fails after saved articles and can resume", async () => {
+  const author = { id: "123", name: "テスト", group: "nogizaka", type: "member" };
+  const articles = Array.from({ length: 11 }, (_, index) => ({
+    id: String(index + 1), url: `https://example.com/${index + 1}`, author,
+  }));
+  const pages = { 1: { items: articles.slice(0, 10), page: 1, hasNext: true }, 2: null };
+  const { runner, first, completed, zipContents } = await runLimitedBackup(20, 1000, pages);
+  assert.equal(first.status, "failed");
+  assert.equal(first.savedCount, 10);
+  assert.match(first.error, /公式一覧を確認できませんでした/);
+  assert.equal(zipContents.size, 0);
+  pages[2] = { items: articles.slice(10), page: 2, hasNext: false };
+  const resumed = await runner.resumeFullBackup(first.id);
+  const finished = await completed(resumed.id);
+  assert.equal(finished.status, "succeeded");
+  assert.equal(finished.savedCount, 11);
+  assert.deepEqual(zipContents.get(first.outputDirectory), articles.map(({ id }) => `dir/${id}`));
+});
+
+test("a deleted cursor article is recovered across ZIP parts without duplicates", async () => {
+  const { runner, first, completed, zipContents, pages } = await runLimitedBackup(2, 100);
+  assert.equal(first.status, "succeeded");
+  pages[1] = { ...pages[1], items: pages[1].items.filter(({ id }) => id !== "2") };
+  const continuation = await runner.continueFullBackup(first.id);
+  const finished = await completed(continuation.id);
+  assert.equal(finished.status, "succeeded");
+  assert.equal(finished.savedCount, 1);
+  assert.deepEqual(zipContents.get(finished.outputDirectory), ["dir/3"]);
 });
