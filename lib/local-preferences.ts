@@ -1,5 +1,4 @@
 import type { BlogAuthor, BlogAuthorType, BlogGroup } from "./catalog/types";
-import { ALL_AUTHORS_ID, SELECTION_LIMITS, type SelectionContent, type SelectionRange } from "./selection.ts";
 
 export const PREFERENCES_KEY = "sakamichi-preferences-v1";
 const MAX_FAVORITES = 30;
@@ -10,17 +9,9 @@ export type FavoriteAuthor = Pick<BlogAuthor, "group"> & {
   authorType: BlogAuthorType;
 };
 
-export type LastSelection = {
-  group: BlogGroup;
-  authorId: string;
-  content: SelectionContent;
-  range: SelectionRange;
-  count: number;
-};
+export type LocalPreferences = { favorites: FavoriteAuthor[] };
 
-export type LocalPreferences = { favorites: FavoriteAuthor[]; lastSelection: LastSelection | null };
-
-export const emptyPreferences = (): LocalPreferences => ({ favorites: [], lastSelection: null });
+export const emptyPreferences = (): LocalPreferences => ({ favorites: [] });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -56,24 +47,12 @@ export function parsePreferences(raw: string | null): LocalPreferences {
         if (favorites.length === MAX_FAVORITES) break;
       }
     }
-    let lastSelection: LastSelection | null = null;
-    const last = value.lastSelection;
-    if (isRecord(last) && isGroup(last.group) && (isAuthorId(last.authorId) || last.authorId === "" || last.authorId === ALL_AUTHORS_ID) &&
-      (last.content === "photos" || last.content === "blog") &&
-      (last.range === "latest-one" || last.range === "latest-n" || last.range === "selected" || last.range === "all") &&
-      Number.isInteger(last.count) && (last.count as number) >= 2 && (last.count as number) <= SELECTION_LIMITS.photos &&
-      !(last.range === "all" && (last.content !== "blog" || last.authorId === ALL_AUTHORS_ID))) {
-      lastSelection = { group: last.group, authorId: last.authorId, content: last.content, range: last.range, count: last.count as number };
-      if (lastSelection.range === "latest-n" && lastSelection.count > SELECTION_LIMITS[lastSelection.content]) {
-        lastSelection.count = SELECTION_LIMITS[lastSelection.content];
-      }
-    }
-    return { favorites, lastSelection };
+    return { favorites };
   } catch { return emptyPreferences(); }
 }
 
 export function serializePreferences(preferences: LocalPreferences): string {
-  return JSON.stringify({ version: 1, favorites: preferences.favorites, lastSelection: preferences.lastSelection });
+  return JSON.stringify({ version: 1, favorites: preferences.favorites });
 }
 
 export function toggleFavorite(favorites: FavoriteAuthor[], author: BlogAuthor): FavoriteAuthor[] {

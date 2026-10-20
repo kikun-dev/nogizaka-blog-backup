@@ -9,7 +9,7 @@ assert.deepEqual(favorites.map(favoriteKey), ["hinatazaka:000", "nogizaka:000"])
 assert.deepEqual(favoriteFromAuthor(generation), { group: "nogizaka", authorId: "5", authorName: "5期生", authorType: "generation" });
 assert.deepEqual(toggleFavorite(favorites, author).map(favoriteKey), ["nogizaka:000"]);
 
-const preferences = { favorites, lastSelection: { group: "hinatazaka", authorId: "000", content: "photos", range: "latest-n", count: 5 } };
+const preferences = { favorites };
 assert.deepEqual(parsePreferences(serializePreferences(preferences)), preferences);
 assert.deepEqual(parsePreferences(null), emptyPreferences());
 assert.deepEqual(parsePreferences("broken json"), emptyPreferences());
@@ -22,11 +22,9 @@ const malformed = { version: 1, favorites: [
   { ...favoriteFromAuthor(staff), authorType: "admin" },
 ], lastSelection: { group: "hinatazaka", authorId: "all", content: "blog", range: "all", count: 5 } };
 assert.deepEqual(parsePreferences(JSON.stringify(malformed)).favorites, [favoriteFromAuthor(author)]);
-assert.equal(parsePreferences(JSON.stringify(malformed)).lastSelection, null);
-
-const selected = { version: 1, favorites: [], lastSelection: { group: "nogizaka", authorId: "5", content: "blog", range: "selected", count: 5, articles: [{ url: "https://example.com" }] } };
-assert.deepEqual(parsePreferences(JSON.stringify(selected)).lastSelection, { group: "nogizaka", authorId: "5", content: "blog", range: "selected", count: 5 });
-const overLimit = { ...selected, lastSelection: { ...selected.lastSelection, range: "latest-n", count: 20 } };
-assert.equal(parsePreferences(JSON.stringify(overLimit)).lastSelection.count, 10);
+assert.deepEqual(parsePreferences(JSON.stringify(malformed)), { favorites: [favoriteFromAuthor(author)] });
+const legacy = JSON.stringify({ version: 1, ...preferences, lastSelection: { group: "hinatazaka", authorId: "000", content: "photos", range: "latest-one", count: 5 } });
+assert.deepEqual(parsePreferences(legacy), preferences);
+assert.equal(serializePreferences(parsePreferences(legacy)).includes("lastSelection"), false);
 
 console.log("Local preferences tests passed.");

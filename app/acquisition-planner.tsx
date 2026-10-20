@@ -31,13 +31,13 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
   onSavePhotos: (selection: SelectionRequest) => Promise<void>;
 }) {
   const [initialPreferences] = useState(readPreferences);
-  const [group, setGroup] = useState<BlogGroup>(initialFavorite?.group ?? initialPreferences.lastSelection?.group ?? "nogizaka");
+  const [group, setGroup] = useState<BlogGroup>(initialFavorite?.group ?? "nogizaka");
   const [authors, setAuthors] = useState<BlogAuthor[]>([]);
   const [loadedGroup, setLoadedGroup] = useState<BlogGroup | null>(null);
-  const [authorId, setAuthorId] = useState(initialFavorite?.authorId ?? initialPreferences.lastSelection?.authorId ?? "");
-  const [content, setContent] = useState<SelectionContent>(initialPreferences.lastSelection?.content ?? "photos");
-  const [range, setRange] = useState<SelectionRange>(initialPreferences.lastSelection?.range ?? "latest-one");
-  const [count, setCount] = useState(String(initialPreferences.lastSelection?.count ?? 5));
+  const [authorId, setAuthorId] = useState(initialFavorite?.authorId ?? "");
+  const [content, setContent] = useState<SelectionContent>("photos");
+  const [range, setRange] = useState<SelectionRange>("latest-one");
+  const [count, setCount] = useState("5");
   const [stage, setStage] = useState<Stage>("conditions");
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSources, setPageSources] = useState<ArticleCursor[]>([{ sourcePage: 1, offset: 0 }]);
@@ -64,7 +64,7 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
 
   useEffect(() => {
     try {
-      if (preferences.favorites.length || preferences.lastSelection) {
+      if (preferences.favorites.length) {
         window.localStorage.setItem(PREFERENCES_KEY, serializePreferences(preferences));
       } else window.localStorage.removeItem(PREFERENCES_KEY);
     } catch { /* Browser storage may be disabled. */ }
@@ -164,17 +164,6 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
     changeAuthor(favorite.authorId);
     setStage("conditions");
     setMessage("");
-  }
-
-  function useLastSelection() {
-    const saved = preferences.lastSelection;
-    if (!saved) return;
-    changeGroup(saved.group);
-    setAuthorId(saved.authorId);
-    setContent(saved.content);
-    setRange(saved.range);
-    setCount(String(saved.count));
-    if (saved.range === "selected") setMessage("ブログを選び直してください。記事の選択履歴は保存していません。");
   }
 
   function changeAuthor(value: string) {
@@ -281,7 +270,6 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
       if (version === confirmationVersion.current && !controller.signal.aborted) {
         setPlan(data.plan);
         setStage("conditions");
-        setPreferences((current) => ({ ...current, lastSelection: { group, authorId, content, range, count: Number(count) >= 2 && Number(count) <= SELECTION_LIMITS.photos ? Number(count) : 5 } }));
       }
     } catch (error) {
       if (version === confirmationVersion.current && !controller.signal.aborted) {
@@ -299,22 +287,15 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
   return (
     <section className="selection-flow" aria-labelledby="selection-heading">
       <h3 id="selection-heading">公式サイトから条件を選ぶ</h3>
-      {(preferences.favorites.length > 0 || preferences.lastSelection) && <div className="saved-preferences">
-        {preferences.favorites.length > 0 && <div className="saved-preferences-group">
+      {preferences.favorites.length > 0 && <div className="saved-preferences">
+        <div className="saved-preferences-group">
           <h4>お気に入り</h4>
           <ul>{preferences.favorites.map((favorite) => <li key={favoriteKey(favorite)}>
             <button type="button" className="favorite-shortcut" onClick={() => chooseFavorite(favorite)}><strong>{favorite.authorName}</strong><small>{groupName[favorite.group]}</small></button>
             <RemoveSavedItemButton label={`${favorite.authorName}をお気に入りから外す`} onClick={() => setPreferences((current) => ({ ...current, favorites: current.favorites.filter((item) => favoriteKey(item) !== favoriteKey(favorite)) }))} />
           </li>)}</ul>
-        </div>}
-        {preferences.lastSelection && <div className="saved-preferences-last">
-          <span>前回の条件: {groupName[preferences.lastSelection.group]}・{preferences.lastSelection.authorId === ALL_AUTHORS_ID ? "全件" : preferences.favorites.find((favorite) => favoriteKey(favorite) === favoriteKey(preferences.lastSelection!))?.authorName ?? "選択したブログ主体"}・{contentName[preferences.lastSelection.content]}・{rangeName[preferences.lastSelection.range]}</span>
-          <div className="saved-preferences-actions">
-            <button type="button" className="text-button" onClick={useLastSelection}>前回の条件を使う</button>
-            <RemoveSavedItemButton label="前回の条件を削除" onClick={() => setPreferences((current) => ({ ...current, lastSelection: null }))} />
-          </div>
-        </div>}
-        <p className="field-help">このブラウザーに保存されています。共用端末では各項目を外してください。</p>
+        </div>
+        <p className="field-help">このブラウザーに保存されています。共用端末ではお気に入りを外してください。</p>
       </div>}
       {stage === "articles" ? (
         <div className="article-screen">
