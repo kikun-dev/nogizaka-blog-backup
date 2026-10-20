@@ -277,6 +277,8 @@ export function LocalJobForm() {
         {job.status === "succeeded" && <>
           <p>{job.savedCount ?? 1}件のブログを保存しました。</p>
           <a className="primary-button" href={`/api/blog-jobs/${job.id}/zip`}>{job.fullBackup && job.backupStopReason ? `今回の${job.savedCount ?? 0}件をZIPで保存` : "PDF・MHTMLをZIPで保存"}</a>
+          {job.fullBackup &&
+            <p className="field-help">4 GB以上のZIPはWindows標準の「すべて展開」でエラーになる場合があります。ダウンロード後は7-ZipなどZIP64対応アプリで展開してください。</p>}
           <p className="field-help">ZIP内はメンバー別・ブログ別フォルダです。各ブログに metadata.json を含みます。</p>
           <p className="field-help">PC上の保存先: <code>{job.outputDirectory}</code></p>
           {job.fullBackup && job.backupStopReason && job.nextCursor && <>

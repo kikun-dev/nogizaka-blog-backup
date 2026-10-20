@@ -325,7 +325,8 @@ export function AcquisitionPlanner({ token, busy, onSaveBlog, onSavePhotos }: {
             {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
               <strong>全件バックアップについて</strong>
               <p>公式一覧の最後まで自動で取得し、通常は完了後に1つのZIPにまとめます。内部では10件ずつ処理するため、件数に応じて長時間かかります。処理中、ほかの保存ジョブは待機します。</p>
-              <p>1つのZIPにまとめられる範囲は最大5,000件・保存データ19 GB・ZIP20 GBです。件数や容量の上限に達した場合は保存済み分のZIPを作り、結果画面から続きの位置で次のZIPを作れます。作成中は開発PCに保存データとZIPの両方を置く空き容量が必要です。4 GBを超えるZIPはZIP64対応アプリで開いてください。</p>
+              <p>1つのZIPにまとめられる範囲は最大5,000件・保存データ19 GB・ZIP20 GBです。件数や容量の上限に達した場合は保存済み分のZIPを作り、結果画面から続きの位置で次のZIPを作れます。作成中は開発PCに保存データとZIPの両方を置く空き容量が必要です。</p>
+              <p>4 GB以上のZIPはWindows標準の「すべて展開」でエラーになる場合があります。ダウンロード後は7-ZipなどZIP64対応アプリで展開してください。</p>
             </div>}
           </fieldset>
           {message && <div role="alert" className="catalog-error"><p className="form-message">{message}</p>{authors.length === 0 && <button type="button" className="secondary-button" onClick={() => setRetry((value) => value + 1)}>一覧を再読み込み</button>}</div>}
