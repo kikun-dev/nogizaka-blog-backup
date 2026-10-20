@@ -55,10 +55,10 @@ test("runner executes one job and bounds its waiting queue", async () => {
     started.push(job.id);
     await new Promise((resolve) => releases.push(resolve));
   });
-  const accepted = await Promise.all(Array.from({ length: 11 }, (_, index) => runner.submit(`https://example.com/${index}`)));
+  const accepted = await Promise.all(Array.from({ length: 11 }, (_, index) => runner.submit(`https://www.nogizaka46.com/s/n46/diary/detail/${index + 1}`)));
   assert.equal(accepted.filter(Boolean).length, 11);
   assert.equal(started.length, 1);
-  assert.equal(await runner.submit("https://example.com"), null);
+  assert.equal(await runner.submit("https://www.nogizaka46.com/s/n46/diary/detail/100"), null);
   releases.shift()();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(started.length, 2);
@@ -133,7 +133,7 @@ async function runLimitedBackup(articleLimit, byteLimit, pageOverrides) {
     },
   };
   const author = { id: "123", name: "テスト", group: "nogizaka", type: "member" };
-  const articles = [1, 2, 3].map((id) => ({ id: String(id), url: `https://example.com/${id}`, author }));
+  const articles = [1, 2, 3].map((id) => ({ id: String(id), url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, author }));
   const pages = pageOverrides ?? { 1: { items: articles, page: 1, hasNext: false } };
   const services = {
     ArchiveOutputLimitError,
@@ -200,7 +200,7 @@ test("byte limit packages completed blogs and leaves the oversized blog for the 
 test("an uncertain empty listing fails after saved articles and can resume", async () => {
   const author = { id: "123", name: "テスト", group: "nogizaka", type: "member" };
   const articles = Array.from({ length: 11 }, (_, index) => ({
-    id: String(index + 1), url: `https://example.com/${index + 1}`, author,
+    id: String(index + 1), url: `https://www.nogizaka46.com/s/n46/diary/detail/${index + 1}`, author,
   }));
   const pages = { 1: { items: articles.slice(0, 10), page: 1, hasNext: true }, 2: null };
   const { runner, first, completed, zipContents } = await runLimitedBackup(20, 1000, pages);
@@ -227,13 +227,49 @@ test("a deleted cursor article is recovered across ZIP parts without duplicates"
   assert.deepEqual(zipContents.get(finished.outputDirectory), ["dir/3"]);
 });
 
+test("deduplication separates groups sharing an article ID and normalizes equivalent URLs", async () => {
+  const jobs = new Map();
+  const releases = [];
+  let nextId = 0;
+  const store = {
+    async failInterrupted() {},
+    async create(articleUrl, options) {
+      const job = { id: `job-${++nextId}`, articleUrl, ...options };
+      jobs.set(job.id, job);
+      return job;
+    },
+    async get(id) { return jobs.get(id) ?? null; },
+  };
+  const runner = new LocalJobRunner(store, async () => {
+    await new Promise((resolve) => releases.push(resolve));
+  });
+  const nogizaka = { id: "42", url: "https://www.nogizaka46.com/s/n46/diary/detail/42?cd=MEMBER",
+    title: "乃木坂の記事", date: "2026-10-21",
+    author: { id: "member-a", name: "A", type: "member", group: "nogizaka" } };
+  const sakurazaka = { id: "42", url: "https://sakurazaka46.com/s/s46/diary/detail/42?cd=blog",
+    title: "櫻坂の記事", date: "2026-10-21",
+    author: { id: "member-b", name: "B", type: "member", group: "sakurazaka" } };
+  const [first, equivalent, otherGroup] = await Promise.all([
+    runner.submitPhotos([nogizaka]),
+    runner.submitPhotos([{ ...nogizaka, url: `${nogizaka.url}&ima=9` }]),
+    runner.submitPhotos([sakurazaka]),
+  ]);
+  assert.equal(equivalent.id, first.id);
+  assert.notEqual(otherGroup.id, first.id);
+  assert.equal(nextId, 2);
+  while (releases.length) {
+    releases.shift()();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+});
+
 test("partial blog job keeps successful ZIP, retries only failures, and deduplicates starts", async () => {
   const jobs = new Map();
   let nextId = 0;
   const archived = [];
   const zipped = [];
   const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
-  const articles = ["1", "2", "3"].map((id) => ({ id, url: `https://example.com/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
+  const articles = ["1", "2", "3"].map((id) => ({ id, url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
   const store = {
     async failInterrupted() {},
     async create(articleUrl, options) {
@@ -301,7 +337,7 @@ test("photo job treats zero images as success and retries an article with failed
   let nextId = 0;
   const calls = [];
   const author = { id: "member", name: "テスト", group: "nogizaka", type: "member" };
-  const articles = ["1", "2"].map((id) => ({ id, url: `https://example.com/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
+  const articles = ["1", "2"].map((id) => ({ id, url: `https://www.nogizaka46.com/s/n46/diary/detail/${id}`, title: `記事${id}`, date: "2026-10-21", author }));
   const store = {
     async failInterrupted() {},
     async create(articleUrl, options) {

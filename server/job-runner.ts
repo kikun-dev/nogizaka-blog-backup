@@ -1,5 +1,6 @@
 import type { BlogArticle, BlogAuthor } from "@/lib/catalog/types";
 import { SelectionError, type BulkCursor } from "@/lib/selection";
+import { normalizeArticleUrl } from "../lib/archive/urls.mjs";
 import { localJobStore, type ArticleResult, type JobStore, type LocalJob } from "./job-store";
 
 export interface JobRunner {
@@ -145,7 +146,12 @@ export class LocalJobRunner implements JobRunner {
   }
 
   private async enqueue(articleUrl: string, options?: Pick<LocalJob, "kind" | "requestedArticles" | "requestedAuthor" | "nextCursor" | "fullBackup" | "backupPhase" | "priorPartIds" | "retryOfJobId">): Promise<LocalJob | null> {
-    const key = JSON.stringify([options?.kind, options?.requestedArticles?.map((article) => article.id) ?? articleUrl,
+    const articleIdentities = options?.requestedArticles?.map((article) => [
+      article.author.group, article.author.id,
+      normalizeArticleUrl(article.url, undefined, article.author.group),
+    ]) ?? [[options?.requestedAuthor?.group, options?.requestedAuthor?.id,
+      normalizeArticleUrl(articleUrl, undefined, options?.requestedAuthor?.group)]];
+    const key = JSON.stringify([options?.kind, articleIdentities,
       options?.fullBackup, options?.nextCursor, options?.priorPartIds, options?.retryOfJobId]);
     const pending = this.submissions.get(key);
     if (pending) return pending;
