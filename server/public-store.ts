@@ -48,6 +48,7 @@ export type CatalogQueryRow = {
   status: "queued" | "running" | "succeeded" | "failed";
   result: Record<string, unknown> | null;
   error: string | null;
+  lease_owner: string | null;
   lease_generation: number;
 };
 
@@ -64,6 +65,65 @@ function db(): SupabaseClient {
 
 function one<T>(data: T | T[] | null): T | null {
   return Array.isArray(data) ? data[0] ?? null : data;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export class InvalidClaimResponseError extends Error {
+  readonly code = "INVALID_CLAIM_RESPONSE";
+  constructor(rpc: string, reason: string) {
+    super(`${rpc} の応答が不正です: ${reason}`);
+    this.name = "InvalidClaimResponseError";
+  }
+}
+
+function claimedRecord(data: unknown, rpc: string, workerId: string): Record<string, unknown> | null {
+  if (data === null) return null;
+  if (Array.isArray(data)) {
+    if (data.length === 0) return null;
+    if (data.length !== 1) throw new InvalidClaimResponseError(rpc, "複数行");
+    return claimedRecord(data[0], rpc, workerId);
+  }
+  if (typeof data !== "object" || data === null) throw new InvalidClaimResponseError(rpc, "オブジェクト以外");
+  const row = data as Record<string, unknown>;
+  // PostgREST may serialize a null composite return value as a row whose
+  // columns are all null, instead of JSON null.
+  if ("id" in row && row.id === null && Object.values(row).every((value) => value === null)) return null;
+  if (typeof row.id !== "string" || !UUID.test(row.id)) throw new InvalidClaimResponseError(rpc, "ID");
+  if (typeof row.owner_session_id !== "string" || !UUID.test(row.owner_session_id)) {
+    throw new InvalidClaimResponseError(rpc, "所有セッションID");
+  }
+  if (row.status !== "running" || row.lease_owner !== workerId
+    || !Number.isSafeInteger(row.lease_generation) || (row.lease_generation as number) < 1) {
+    throw new InvalidClaimResponseError(rpc, "リース");
+  }
+  if (typeof row.request !== "object" || row.request === null || Array.isArray(row.request)) {
+    throw new InvalidClaimResponseError(rpc, "取得条件");
+  }
+  return row;
+}
+
+export function parseClaimedJob(data: unknown, workerId: string): PublicJobRow | null {
+  const row = claimedRecord(data, "claim_job", workerId);
+  if (row === null) return null;
+  if (row.kind !== "blog" && row.kind !== "photos") throw new InvalidClaimResponseError("claim_job", "保存種別");
+  const request = row.request as Record<string, unknown>;
+  if (!(typeof request.selection === "object" && request.selection !== null && !Array.isArray(request.selection))
+    && !(Array.isArray(request.retryArticles) && typeof request.author === "object" && request.author !== null)) {
+    throw new InvalidClaimResponseError("claim_job", "取得条件の内容");
+  }
+  if (typeof row.created_at !== "string" || typeof row.updated_at !== "string") {
+    throw new InvalidClaimResponseError("claim_job", "日時");
+  }
+  return row as PublicJobRow;
+}
+
+export function parseClaimedCatalogQuery(data: unknown, workerId: string): CatalogQueryRow | null {
+  const row = claimedRecord(data, "claim_catalog_query", workerId);
+  if (row !== null && !["authors", "articles", "selection"].includes((row.request as Record<string, unknown>).kind as string)) {
+    throw new InvalidClaimResponseError("claim_catalog_query", "一覧取得種別");
+  }
+  return row === null ? null : row as CatalogQueryRow;
 }
 
 export function tokenHash(token: string): string {
@@ -143,7 +203,7 @@ export function publicJobView(row: PublicJobRow): LocalJob {
 export async function claimPublicJob(workerId: string): Promise<PublicJobRow | null> {
   const { data, error } = await db().rpc("claim_job", { p_worker_id: workerId });
   if (error) throw error;
-  return one(data) as PublicJobRow | null;
+  return parseClaimedJob(data, workerId);
 }
 
 export async function heartbeatPublicJob(jobId: string, workerId: string, generation: number): Promise<boolean> {
@@ -203,7 +263,7 @@ export async function getCatalogQuery(id: string, ownerId: string): Promise<Cata
 export async function claimCatalogQuery(workerId: string): Promise<CatalogQueryRow | null> {
   const { data, error } = await db().rpc("claim_catalog_query", { p_worker_id: workerId });
   if (error) throw error;
-  return one(data) as CatalogQueryRow | null;
+  return parseClaimedCatalogQuery(data, workerId);
 }
 
 export async function heartbeatCatalogQuery(id: string, workerId: string, generation: number): Promise<boolean> {

@@ -13,6 +13,8 @@ import {
   type ArtifactInput, type PublicJobRow, type CatalogQueryRow,
 } from "../server/public-store";
 import { deleteArtifact, uploadArtifact } from "../server/public-r2";
+import { errorDiagnostic } from "./diagnostics";
+import { pollOnce } from "./poll";
 
 const MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
 const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
@@ -156,8 +158,11 @@ async function runClaimed(row: PublicJobRow): Promise<void> {
       const detail = error instanceof Error ? error.message : "";
       const message = /^(ワーカーの空き容量|写真の|ブログZIP|取得する記事|公式一覧|公開版|再試行する記事)/.test(detail)
         ? detail : "ワーカーが処理を完了できませんでした。再試行してください。";
-      await completePublicJob(row.id, workerId, generation, "failed", localJob ? safeState(localJob) : {}, message, []).catch(() => {});
-      console.error("Public job failed", { jobId: row.id, errorType: error instanceof Error ? error.name : "unknown" });
+      await completePublicJob(row.id, workerId, generation, "failed", localJob ? safeState(localJob) : {}, message, [])
+        .catch((commitError: unknown) => {
+          console.error("Failed to record public job failure", { jobId: row.id, ...errorDiagnostic(commitError) });
+        });
+      console.error("Public job failed", { jobId: row.id, ...errorDiagnostic(error) });
     }
   } finally {
     clearInterval(heartbeat);
@@ -183,7 +188,11 @@ async function runCatalog(row: CatalogQueryRow): Promise<void> {
     if (!lostLease) {
       const message = error instanceof Error && /^(公式|対象外|記事一覧|ブログ|公開版)/.test(error.message)
         ? error.message : "公式一覧を取得できませんでした。少し待って再試行してください。";
-      await completeCatalogQuery(row.id, workerId, generation, null, message).catch(() => {});
+      await completeCatalogQuery(row.id, workerId, generation, null, message)
+        .catch((commitError: unknown) => {
+          console.error("Failed to record catalog query failure", { queryId: row.id, ...errorDiagnostic(commitError) });
+        });
+      console.error("Catalog query failed", { queryId: row.id, ...errorDiagnostic(error) });
     }
   } finally { clearInterval(heartbeat); }
 }
@@ -191,11 +200,10 @@ async function runCatalog(row: CatalogQueryRow): Promise<void> {
 async function jobLoop(): Promise<void> {
   while (!stopping) {
     try {
-      const row = await claimPublicJob(workerId);
-      if (row) await runClaimed(row);
-      else await delay(5_000);
+      const handled = await pollOnce(() => claimPublicJob(workerId), runClaimed);
+      if (!handled) await delay(5_000);
     } catch (error) {
-      console.error("Worker polling failed", { errorType: error instanceof Error ? error.name : "unknown" });
+      console.error("Worker polling failed", errorDiagnostic(error));
       await delay(10_000);
     }
   }
@@ -204,11 +212,10 @@ async function jobLoop(): Promise<void> {
 async function catalogLoop(): Promise<void> {
   while (!stopping) {
     try {
-      const row = await claimCatalogQuery(workerId);
-      if (row) await runCatalog(row);
-      else await delay(1_000);
+      const handled = await pollOnce(() => claimCatalogQuery(workerId), runCatalog);
+      if (!handled) await delay(1_000);
     } catch (error) {
-      console.error("Catalog polling failed", { errorType: error instanceof Error ? error.name : "unknown" });
+      console.error("Catalog polling failed", errorDiagnostic(error));
       await delay(10_000);
     }
   }
