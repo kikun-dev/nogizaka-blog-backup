@@ -334,7 +334,7 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
       <p className="workspace-description">メンバーを選んで、保存する内容とブログの範囲を決めます。</p>
       {job && <button type="button" className="secondary-button photo-reopen" onClick={() => setView(job.kind === "photos" ? "photos" : "blog")}>{job.kind === "photos" ? "写真の取得結果を見る" : "ブログの保存結果を見る"}</button>}
       {!publicMode && savedBulkJobId && readyToken && <button type="button" className="secondary-button photo-reopen" disabled={busy} onClick={() => void resumeBulkJob()}>前回の全件バックアップの結果を見る・再開する</button>}
-      {publicMode && readyToken ? <p className="field-help" role="status">アクセスを確認しました。保存したファイルは24時間以内にダウンロードしてください。</p> : <div className="token-field">
+      {publicMode && readyToken ? <p className="field-help" role="status">アクセスを確認しました。保存後は早めにダウンロードしてください。アプリでの期限は保存完了から24時間です。</p> : <div className="token-field">
         <label htmlFor="access-token">{publicMode ? "共有アクセスコード" : "ローカルアクセストークン"}</label>
         <input ref={tokenRef} id="access-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => { if (readyToken) setPendingFavorite(null); setAccessToken(event.target.value); setReadyToken(""); }} aria-describedby="token-help" />
         <p id="token-help" className="field-help">{publicMode ? "共有されたアクセスコードを入力してください。" : "開発PCの .env.local に設定したトークンを入力してください。"}</p>

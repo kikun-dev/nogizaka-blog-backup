@@ -13,7 +13,7 @@ export default function Home() {
       <div className="content">
         <LocalJobForm publicMode={publicMode} />
       </div>
-      <footer className="site-footer">{publicMode ? "保存したファイルは24時間以内にダウンロードしてください。" : "保存したファイルは、このパソコンの開発用フォルダに置かれます。"}</footer>
+      <footer className="site-footer">{publicMode ? "保存後は早めにダウンロードしてください。アプリでの期限は保存完了から24時間です。" : "保存したファイルは、このパソコンの開発用フォルダに置かれます。"}</footer>
     </main>
   );
 }

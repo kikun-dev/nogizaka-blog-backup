@@ -227,6 +227,8 @@ begin
     lease_generation = lease_generation + 1, lease_expires_at = now() + interval '90 seconds',
     started_at = now(), updated_at = now()
   where id = v_job.id returning * into v_job;
+  update public.access_sessions set expires_at = greatest(expires_at, now() + interval '24 hours')
+  where id = v_job.owner_session_id;
   return v_job;
 end;
 $$;
@@ -240,7 +242,12 @@ begin
   update public.jobs set lease_expires_at = now() + interval '90 seconds', updated_at = now()
   where id = p_job_id and status = 'running' and lease_owner = p_worker_id
     and lease_generation = p_generation and lease_expires_at > now();
-  return found;
+  if not found then return false; end if;
+  update public.access_sessions as session
+    set expires_at = greatest(session.expires_at, now() + interval '24 hours')
+  from public.jobs as job
+  where job.id = p_job_id and session.id = job.owner_session_id;
+  return true;
 end;
 $$;
 
@@ -289,6 +296,8 @@ begin
   update public.jobs set status = p_status, state = p_state, error = p_error,
     lease_owner = null, lease_expires_at = null, finished_at = now(), updated_at = now()
   where id = p_job_id;
+  update public.access_sessions set expires_at = greatest(expires_at, now() + interval '24 hours')
+  where id = v_job.owner_session_id;
   return true;
 end;
 $$;

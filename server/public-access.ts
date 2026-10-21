@@ -2,7 +2,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createAccessSession, findAccessSession } from "./public-store";
 
 const COOKIE = "sakamichi_session";
-const SESSION_SECONDS = 24 * 60 * 60;
+// The database controls access: it starts at 24 hours and can be extended while
+// a job runs and until its artifacts expire. Keep the cookie long enough for
+// that server-side extension to remain usable after the original login day.
+const COOKIE_SECONDS = 7 * 24 * 60 * 60;
 
 export function isPublicMode(): boolean {
   // A missing APP_MODE on a Vercel deployment must never fall back to the
@@ -32,7 +35,7 @@ export async function loginWithSharedCode(code: unknown, request: Request): Prom
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return Response.json({ ok: true }, {
     headers: {
-      "Set-Cookie": `${COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_SECONDS}${secure}`,
+      "Set-Cookie": `${COOKIE}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${COOKIE_SECONDS}${secure}`,
       "Cache-Control": "no-store",
     },
   });

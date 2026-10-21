@@ -31,6 +31,40 @@ test("worker skips queued jobs after the owner session expires", async () => {
   } finally { await db.close(); }
 });
 
+test("the owner session remains valid through processing and artifact expiry", async () => {
+  const db = await database();
+  try {
+    const session = await db.query("insert into public.access_sessions(token_hash,expires_at) values ('near-expiry',now()+interval '1 minute') returning id");
+    const owner = session.rows[0].id;
+    const created = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [owner]);
+    const jobId = created.rows[0].id;
+    const worker = "55555555-5555-4555-8555-555555555555";
+    const claimed = await db.query("select (public.claim_job($1)).lease_generation as generation", [worker]);
+    assert.equal(claimed.rows[0].generation, 1);
+    const afterClaim = await db.query("select expires_at > now()+interval '23 hours' as valid from public.access_sessions where id=$1", [owner]);
+    assert.equal(afterClaim.rows[0].valid, true);
+
+    await db.query("update public.access_sessions set expires_at=now()+interval '1 minute' where id=$1", [owner]);
+    const staleHeartbeat = await db.query("select public.heartbeat_job($1,$2,0) as accepted", [jobId, worker]);
+    assert.equal(staleHeartbeat.rows[0].accepted, false);
+    const afterStaleHeartbeat = await db.query("select expires_at < now()+interval '2 minutes' as unchanged from public.access_sessions where id=$1", [owner]);
+    assert.equal(afterStaleHeartbeat.rows[0].unchanged, true);
+    const heartbeat = await db.query("select public.heartbeat_job($1,$2,1) as accepted", [jobId, worker]);
+    assert.equal(heartbeat.rows[0].accepted, true);
+    const afterHeartbeat = await db.query("select expires_at > now()+interval '23 hours' as valid from public.access_sessions where id=$1", [owner]);
+    assert.equal(afterHeartbeat.rows[0].valid, true);
+
+    await db.query("update public.access_sessions set expires_at=now()+interval '1 minute' where id=$1", [owner]);
+    const artifact = JSON.stringify([{ kind: "blog_zip", object_key: `${jobId}/1/blogs.zip`, mime_type: "application/zip", byte_size: 123 }]);
+    const completed = await db.query("select public.complete_job($1,$2,1,'succeeded','{}'::jsonb,null,$3::jsonb) as accepted", [jobId, worker, artifact]);
+    assert.equal(completed.rows[0].accepted, true);
+    const access = await db.query(`select session.expires_at >= artifact.expires_at as covered
+      from public.access_sessions as session join public.jobs as job on job.owner_session_id=session.id
+      join public.artifacts as artifact on artifact.job_id=job.id where job.id=$1`, [jobId]);
+    assert.equal(access.rows[0].covered, true);
+  } finally { await db.close(); }
+});
+
 test("migration enforces session and global queue capacity", async () => {
   const db = await database();
   try {
