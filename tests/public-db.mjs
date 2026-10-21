@@ -5,10 +5,62 @@ import { PGlite } from "@electric-sql/pglite";
 
 async function database() {
   const db = new PGlite();
-  await db.exec("create role anon; create role authenticated; create role service_role;");
+  await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
   await db.exec(await readFile(new URL("../supabase/migrations/20261021130000_public_jobs.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../supabase/migrations/20261022120000_service_role_table_privileges.sql", import.meta.url), "utf8"));
   return db;
 }
+
+test("service_role receives only required direct table privileges while RLS and RPC restrictions remain", async () => {
+  const db = await database();
+  try {
+    const tables = ["access_sessions", "jobs", "artifacts", "worker_heartbeats", "catalog_queries"];
+    for (const table of tables) {
+      for (const privilege of ["SELECT", "INSERT", "UPDATE", "DELETE"]) {
+        const expected = privilege === "SELECT" || (table === "access_sessions" && privilege === "INSERT");
+        const result = await db.query("select has_table_privilege('service_role',$1,$2) as allowed", [`public.${table}`, privilege]);
+        assert.equal(result.rows[0].allowed, expected, `service_role ${privilege} on ${table}`);
+        for (const role of ["anon", "authenticated"]) {
+          const denied = await db.query("select has_table_privilege($1,$2,$3) as allowed", [role, `public.${table}`, privilege]);
+          assert.equal(denied.rows[0].allowed, false, `${role} ${privilege} on ${table}`);
+        }
+      }
+    }
+    const schema = await db.query("select has_schema_privilege('service_role','public','USAGE') as allowed");
+    assert.equal(schema.rows[0].allowed, true);
+    const rls = await db.query(`select relname, relrowsecurity from pg_catalog.pg_class
+      where relnamespace = 'public'::regnamespace and relname in
+      ('access_sessions','jobs','artifacts','worker_heartbeats','catalog_queries')`);
+    assert.equal(rls.rows.length, tables.length);
+    assert.ok(rls.rows.every((row) => row.relrowsecurity === true));
+
+    const functions = [
+      "enqueue_job(uuid,text,jsonb,uuid)", "recover_stale_jobs()", "claim_job(uuid)",
+      "heartbeat_job(uuid,uuid,integer)", "progress_job(uuid,uuid,integer,jsonb,jsonb)",
+      "complete_job(uuid,uuid,integer,text,jsonb,text,jsonb)", "enqueue_catalog_query(uuid,jsonb)",
+      "claim_catalog_query(uuid)", "heartbeat_catalog_query(uuid,uuid,integer)",
+      "complete_catalog_query(uuid,uuid,integer,jsonb,text)",
+    ];
+    for (const signature of functions) {
+      for (const role of ["service_role", "anon", "authenticated"]) {
+        const result = await db.query("select has_function_privilege($1,$2,'EXECUTE') as allowed", [role, `public.${signature}`]);
+        assert.equal(result.rows[0].allowed, role === "service_role", `${role} EXECUTE ${signature}`);
+      }
+    }
+
+    await db.exec("set role service_role");
+    try {
+      const created = await db.query("insert into public.access_sessions(token_hash,expires_at) values ('service-session',now()+interval '1 day') returning id");
+      const read = await db.query("select id from public.access_sessions where id=$1", [created.rows[0].id]);
+      assert.equal(read.rows[0].id, created.rows[0].id);
+      const job = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [created.rows[0].id]);
+      const claimed = await db.query("select (public.claim_job($1)).id as id", ["22222222-2222-4222-8222-222222222222"]);
+      assert.equal(claimed.rows[0].id, job.rows[0].id);
+      await assert.rejects(db.query("update public.access_sessions set expires_at=now() where id=$1", [created.rows[0].id]), /permission denied/);
+      await assert.rejects(db.query("insert into public.worker_heartbeats(worker_id) values ('11111111-1111-4111-8111-111111111111')"), /permission denied/);
+    } finally { await db.exec("reset role"); }
+  } finally { await db.close(); }
+});
 
 test("worker skips queued jobs after the owner session expires", async () => {
   const db = await database();
