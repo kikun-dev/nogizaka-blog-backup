@@ -89,7 +89,7 @@ npm run build
 
 公開モードは Next.js Web/API、Supabase、Cloudflare R2、`npm run worker` の4要素で構成します。Web は Vercel、ワーカーは当面 WSL2 上で動かします。メンバー・記事一覧の取得も Supabase 経由でワーカーへ依頼するため、公開 Web API では Playwright を起動しません。ワーカーは Supabase へ外向きに接続するため、開発 PC のポート開放は不要です。OCI へ移す場合も同じワーカーと環境変数を使えます。
 
-1. `supabase/migrations/20261021130000_public_jobs.sql` をレビューし、Supabase CLI の `db push` で対象プロジェクトへ適用します。リモートの SQL Editor で別途テーブルを作らないでください。
+1. `supabase/migrations/` の SQL をレビューし、Supabase CLI の `db push` で対象プロジェクトへ順番に適用します。リモートの SQL Editor で別途テーブルを作らないでください。所有セッションが失効した待機ジョブは、ワーカーが獲得する前に失敗扱いにします。
 2. `.env.example` の公開モード用変数を、Vercel とワーカーのそれぞれに設定します。`SUPABASE_SECRET_KEY` と R2 のキーはブラウザ向け変数にしません。Vercel にはバケット限定の Object Read キーを別に作成して設定し、ワーカーには既存の Object Read & Write キーを設定します。
 3. WSL2 では `WORKER_OUTPUT_ROOT` に空き容量のある絶対パスを指定します。ワーカーは開始前に2 GB以上の空き容量を確認し、専用の `sakamichi-worker` サブディレクトリだけを一時領域として使用します。実行中は `npm run worker` を起動したままにします。
 4. まず `APP_MODE=public` のローカル Web とワーカーで、最新1件の写真、少数記事のブログ、ZIPを確認します。R2のオブジェクトは24時間後にアプリから利用不可になり、設定済みのR2削除ルールで後から削除されます。

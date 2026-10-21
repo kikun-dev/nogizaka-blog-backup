@@ -1,14 +1,38 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 
 async function database() {
   const db = new PGlite();
   await db.exec("create role anon; create role authenticated; create role service_role;");
-  await db.exec(await readFile(new URL("../supabase/migrations/20261021130000_public_jobs.sql", import.meta.url), "utf8"));
+  const migrations = new URL("../supabase/migrations/", import.meta.url);
+  for (const name of (await readdir(migrations)).filter((file) => file.endsWith(".sql")).sort()) {
+    await db.exec(await readFile(new URL(name, migrations), "utf8"));
+  }
   return db;
 }
+
+test("worker skips queued jobs after the owner session expires", async () => {
+  const db = await database();
+  try {
+    const expiredSession = await db.query("insert into public.access_sessions(token_hash,expires_at) values ('expired',now()+interval '1 day') returning id");
+    const expiredOwner = expiredSession.rows[0].id;
+    const oldJob = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [expiredOwner]);
+    await db.query("update public.access_sessions set expires_at=now()-interval '1 second' where id=$1", [expiredOwner]);
+
+    const currentSession = await db.query("insert into public.access_sessions(token_hash,expires_at) values ('current',now()+interval '1 day') returning id");
+    const currentJob = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [currentSession.rows[0].id]);
+    const worker = "44444444-4444-4444-8444-444444444444";
+    const claimed = await db.query("select (public.claim_job($1)).id as id", [worker]);
+    assert.equal(claimed.rows[0].id, currentJob.rows[0].id);
+
+    const expired = await db.query("select status,lease_generation,finished_at from public.jobs where id=$1", [oldJob.rows[0].id]);
+    assert.equal(expired.rows[0].status, "failed");
+    assert.equal(expired.rows[0].lease_generation, 0);
+    assert.ok(expired.rows[0].finished_at);
+  } finally { await db.close(); }
+});
 
 test("migration enforces session and global queue capacity", async () => {
   const db = await database();
