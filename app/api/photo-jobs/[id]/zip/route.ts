@@ -2,14 +2,16 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { localJobStore } from "@/server/job-store";
 import { checkPhotoSession } from "@/server/photo-session";
+import { isPublicMode } from "@/server/public-access";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (isPublicMode()) return (await import("@/server/public-api")).publicArtifactRedirect(request, (await context.params).id, "photo_zip");
   const denied = checkPhotoSession(request);
   if (denied) return denied;
+  const { localJobStore } = await import("@/server/job-store");
   const { id } = await context.params;
   const job = await localJobStore.get(id);
   if (job?.kind !== "photos" || !job.photoZipReady) return Response.json({ error: "ZIPが見つかりません。" }, { status: 404 });

@@ -17,7 +17,7 @@ const statusLabel = {
 } as const;
 const groupName = { nogizaka: "乃木坂46", sakurazaka: "櫻坂46", hinatazaka: "日向坂46" } as const;
 
-export function LocalJobForm() {
+export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
   const [view, setView] = useState<"setup" | "photos" | "blog">("setup");
   const [url, setUrl] = useState("");
   const [accessToken, setAccessToken] = useState("");
@@ -28,6 +28,7 @@ export function LocalJobForm() {
   const [savedBulkJobId, setSavedBulkJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [workerOffline, setWorkerOffline] = useState(false);
   const previousView = useRef(view);
   const setupRef = useRef<HTMLElement>(null);
   const resultRef = useRef<HTMLElement>(null);
@@ -101,10 +102,33 @@ export function LocalJobForm() {
   }, [job, view]);
 
   useEffect(() => {
+    if (!publicMode) return;
+    let active = true;
+    void fetch("/api/access-session", { cache: "no-store" }).then((response) => response.json())
+      .then((data: { authenticated?: boolean }) => { if (active && data.authenticated) setReadyToken("public-session"); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [publicMode]);
+
+  useEffect(() => {
+    if (publicMode) return;
     if (!accessToken) return;
     const timer = window.setTimeout(() => setReadyToken(accessToken), 600);
     return () => window.clearTimeout(timer);
-  }, [accessToken]);
+  }, [accessToken, publicMode]);
+
+  async function loginPublic() {
+    setMessage("");
+    try {
+      const response = await fetch("/api/access-session", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: accessToken }),
+      });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(data.error ?? "アクセスできませんでした。");
+      setAccessToken("");
+      setReadyToken("public-session");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "アクセスできませんでした。"); }
+  }
 
   useEffect(() => {
     if (!activeJobId || (activeStatus !== "queued" && activeStatus !== "running")) return;
@@ -114,9 +138,13 @@ export function LocalJobForm() {
           cache: "no-store",
           headers: { Authorization: `Bearer ${accessToken}` },
         });
-        if (!response.ok) throw new Error("状態を確認できませんでした。画面を再読み込みしてください。");
-        const data = await response.json() as { job: LocalJob };
+        if (!response.ok) {
+          const failure = await response.json().catch(() => ({})) as { error?: string };
+          throw new Error(failure.error ?? "状態を確認できませんでした。画面を再読み込みしてください。");
+        }
+        const data = await response.json() as { job: LocalJob; workerOffline?: boolean };
         setJob(data.job);
+        setWorkerOffline(Boolean(data.workerOffline));
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "状態を確認できませんでした。");
         window.clearInterval(timer);
@@ -295,24 +323,26 @@ export function LocalJobForm() {
       <h1>大切なブログを、<br className="mobile-break" />手元に残す。</h1>
       <p>
         乃木坂46・櫻坂46・日向坂46の公式ブログを保存するためのツールです。
-        公式サイトの一覧からメンバーと取得範囲を選べます。写真の閲覧・保存と、ブログの複数件・全件バックアップができます。
+        公式サイトの一覧からメンバーと取得範囲を選べます。写真の閲覧・保存と、ブログの複数件{publicMode ? "" : "・全件バックアップ"}ができます。
       </p>
     </div>}
     <section ref={setupRef} className="workspace" aria-labelledby="workspace-title" hidden={view !== "setup"}>
       <div className="workspace-heading">
         <div><h2 ref={setupHeadingRef} id="workspace-title" tabIndex={-1}>取得条件を決める</h2></div>
-        <span className="phase-badge">ローカル版</span>
+        <span className="phase-badge">{publicMode ? "公開版" : "ローカル版"}</span>
       </div>
       <p className="workspace-description">メンバーを選んで、保存する内容とブログの範囲を決めます。</p>
       {job && <button type="button" className="secondary-button photo-reopen" onClick={() => setView(job.kind === "photos" ? "photos" : "blog")}>{job.kind === "photos" ? "写真の取得結果を見る" : "ブログの保存結果を見る"}</button>}
-      {savedBulkJobId && readyToken && <button type="button" className="secondary-button photo-reopen" disabled={busy} onClick={() => void resumeBulkJob()}>前回の全件バックアップの結果を見る・再開する</button>}
-      <div className="token-field">
-        <label htmlFor="access-token">ローカルアクセストークン</label>
+      {!publicMode && savedBulkJobId && readyToken && <button type="button" className="secondary-button photo-reopen" disabled={busy} onClick={() => void resumeBulkJob()}>前回の全件バックアップの結果を見る・再開する</button>}
+      {publicMode && readyToken ? <p className="field-help" role="status">アクセスを確認しました。保存したファイルは24時間以内にダウンロードしてください。</p> : <div className="token-field">
+        <label htmlFor="access-token">{publicMode ? "共有アクセスコード" : "ローカルアクセストークン"}</label>
         <input ref={tokenRef} id="access-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => { if (readyToken) setPendingFavorite(null); setAccessToken(event.target.value); setReadyToken(""); }} aria-describedby="token-help" />
-        <p id="token-help" className="field-help">開発PCの .env.local に設定したトークンを入力してください。</p>
-      </div>
+        <p id="token-help" className="field-help">{publicMode ? "共有されたアクセスコードを入力してください。" : "開発PCの .env.local に設定したトークンを入力してください。"}</p>
+        {publicMode && !readyToken && <button type="button" className="secondary-button" onClick={() => void loginPublic()}>アクセスする</button>}
+      </div>}
+      {message && view === "setup" && <p className="form-message" role="alert">{message}</p>}
 
-      {readyToken ? <AcquisitionPlanner token={readyToken} busy={busy} initialFavorite={pendingFavorite} onSaveBlog={submitBlogJob} onSavePhotos={submitPhotoJob} />
+      {readyToken ? <AcquisitionPlanner token={readyToken} publicMode={publicMode} busy={busy} initialFavorite={pendingFavorite} onSaveBlog={submitBlogJob} onSavePhotos={submitPhotoJob} />
         : <>
           {preferencesPreview.favorites.length > 0 && <div className="saved-preferences landing-favorites">
             <h3>お気に入りのブログ</h3>
@@ -326,10 +356,10 @@ export function LocalJobForm() {
             {pendingFavorite && <p className="field-help" role="status">{pendingFavorite.authorName}を選択しました。トークンを入力すると取得条件に反映します。</p>}
             <p className="field-help">このブラウザーに保存されています。共用端末ではお気に入りを外してください。</p>
           </div>}
-          <p className="selection-start-help">トークンを入力すると取得条件を選べます。</p>
+          <p className="selection-start-help">{publicMode ? "アクセスコードを入力すると取得条件を選べます。" : "トークンを入力すると取得条件を選べます。"}</p>
         </>}
 
-      <form onSubmit={submit} className="job-form direct-url-form">
+      {!publicMode && <form onSubmit={submit} className="job-form direct-url-form">
         <h3>ブログの個別URLで1件保存</h3>
         <p className="field-help">公式一覧にないブログはURLを直接入力できます。PDFとMHTMLを保存します。</p>
         <label htmlFor="article-url">ブログの個別URL</label>
@@ -337,7 +367,7 @@ export function LocalJobForm() {
           <input id="article-url" type="url" inputMode="url" autoComplete="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://www.nogizaka46.com/s/n46/diary/detail/..." />
           <button type="submit" disabled={busy}>{submitting ? "開始中…" : "保存を開始"}</button>
         </div>
-      </form>
+      </form>}
 
     </section>
     <section ref={resultRef} className="workspace photo-result-screen" aria-labelledby="result-title" hidden={view === "setup"}>
@@ -348,6 +378,7 @@ export function LocalJobForm() {
       <h2 ref={resultHeadingRef} id="result-title" tabIndex={-1} aria-live="polite">{view === "photos" ? job?.kind === "photos" && (job.status === "succeeded" || job.status === "partial") ? "取得した写真" : "写真の取得結果" : "ブログの保存結果"}</h2>
       {submitting && <p className="photo-screen-message" role="status">{view === "photos" ? "写真の取得" : "ブログの保存"}を開始しています…</p>}
       {message && <p className="form-message" role="alert">{message}</p>}
+      {publicMode && workerOffline && job?.status === "queued" && <p className="form-message" role="status">ワーカーが停止中です。開始までお待ちください。</p>}
       {job && !job.fullBackup && <div className="job-progress" aria-live="polite">
         <p>進捗: {job.articleResults?.length ?? 0} / {job.requestedArticles?.length ?? 1} 件</p>
         {job.currentArticle && <p>処理中: {job.currentArticle.title}（{job.currentArticle.date || "投稿日不明"}）</p>}
@@ -374,7 +405,7 @@ export function LocalJobForm() {
           {job.fullBackup &&
             <p className="field-help">4 GB以上のZIPはWindows標準の「すべて展開」でエラーになる場合があります。ダウンロード後は7-ZipなどZIP64対応アプリで展開してください。</p>}
           <p className="field-help">ZIP内はメンバー別・ブログ別フォルダです。各ブログに metadata.json を含みます。</p>
-          <p className="field-help">PC上の保存先: <code>{job.outputDirectory}</code></p>
+          {!publicMode && <p className="field-help">PC上の保存先: <code>{job.outputDirectory}</code></p>}
           {job.fullBackup && job.backupStopReason && job.nextCursor && <>
             <p className="field-help">{job.backupStopReason === "article-limit" ? "5,000件" : "保存データ19 GB"}の上限に達しました。保存済み分はZIPにまとめました。続きは公式一覧の{job.nextCursor.page}ページ目・{job.nextCursor.offset + 1}件目から開始します。</p>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => void continueBackup()}>続きから全件バックアップを開始</button>

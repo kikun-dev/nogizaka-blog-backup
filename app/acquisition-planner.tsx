@@ -23,8 +23,9 @@ function readPreferences(): LocalPreferences {
   catch { return emptyPreferences(); }
 }
 
-export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, onSavePhotos }: {
+export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, onSavePhotos, publicMode = false }: {
   token: string;
+  publicMode?: boolean;
   busy: boolean;
   initialFavorite?: FavoriteAuthor | null;
   onSaveBlog: (selection: SelectionRequest) => Promise<void>;
@@ -368,7 +369,7 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
             {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">ブログの件数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>ブログを選ぶ</strong><small>ページを跨いで{limit}件まで</small></span></label>
             {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorValid} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
-            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog" || groupWide} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{groupWide ? "グループ全体では選べません" : content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
+            {!publicMode && <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog" || groupWide} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{groupWide ? "グループ全体では選べません" : content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>}
             {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
               <strong>全件バックアップについて</strong>
               <p>公式一覧の最後まで自動で取得し、通常は完了後に1つのZIPにまとめます。内部では10件ずつ処理するため、件数に応じて長時間かかります。処理中、ほかの保存ジョブは待機します。</p>

@@ -1,15 +1,17 @@
-import { getArticlePage, getAuthors, groupSelectionAuthor } from "@/server/catalog";
 import { ArticleAuthorError } from "@/server/catalog/adapters";
 import { checkLocalAccess } from "@/server/local-access";
-import { localJobRunner } from "@/server/job-runner";
 import { blogSessionCookie } from "@/server/blog-session";
+import { isPublicMode } from "@/server/public-access";
 import { ALL_AUTHORS_ID, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  if (isPublicMode()) return (await import("@/server/public-api")).submitPublicSelection(request, "blog");
   const denied = checkLocalAccess(request);
   if (denied) return denied;
+  const { localJobRunner } = await import("@/server/job-runner");
+  const { getArticlePage, getAuthors, groupSelectionAuthor } = await import("@/server/catalog");
   let selection;
   try {
     const raw = await request.text();

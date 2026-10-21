@@ -1,0 +1,225 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readdir, rm, stat, statfs } from "node:fs/promises";
+import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { getArticlePage, getAuthors, groupSelectionAuthor } from "../server/catalog";
+import { ALL_AUTHORS_ID, collectLatestArticles, validateSelection, verifySelectedArticles } from "../lib/selection";
+import { LocalJobRunner } from "../server/job-runner";
+import { executeCatalogQuery } from "../server/public-catalog-worker";
+import type { JobStore, LocalJob } from "../server/job-store";
+import {
+  claimPublicJob, completePublicJob, heartbeatPublicJob, progressPublicJob,
+  claimCatalogQuery, heartbeatCatalogQuery, completeCatalogQuery,
+  type ArtifactInput, type PublicJobRow, type CatalogQueryRow,
+} from "../server/public-store";
+import { deleteArtifact, uploadArtifact } from "../server/public-r2";
+
+const MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
+const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
+const workerId = randomUUID();
+let stopping = false;
+
+class LeaseLostError extends Error {}
+
+function workRoot(): string {
+  const configured = process.env.WORKER_OUTPUT_ROOT;
+  if (!configured || !path.isAbsolute(configured)) throw new Error("WORKER_OUTPUT_ROOT に絶対パスを設定してください。");
+  return path.join(configured, "sakamichi-worker");
+}
+
+async function prepareWork(): Promise<string> {
+  const root = workRoot();
+  await mkdir(root, { recursive: true });
+  const disk = await statfs(root);
+  if (disk.bavail * disk.bsize < MIN_FREE_BYTES) throw new Error("ワーカーの空き容量が2 GB未満です。保存先を確認してください。");
+  return mkdtemp(path.join(root, `job-${process.pid}-`));
+}
+
+async function cleanOrphanWork(): Promise<void> {
+  const root = workRoot();
+  await mkdir(root, { recursive: true });
+  for (const name of await readdir(root)) {
+    const match = /^job-(\d+)-[A-Za-z0-9]+$/.exec(name);
+    if (!match) continue;
+    try { process.kill(Number(match[1]), 0); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        await rm(path.join(root, name), { recursive: true, force: true });
+      }
+    }
+  }
+}
+
+async function resolveJob(row: PublicJobRow, outputDirectory: string): Promise<LocalJob> {
+  let articles: NonNullable<LocalJob["requestedArticles"]>;
+  let author: NonNullable<LocalJob["requestedAuthor"]>;
+  if ("retryArticles" in row.request) {
+    articles = row.request.retryArticles;
+    author = row.request.author;
+    if (!articles.length || articles.length > (row.kind === "photos" ? 20 : 10)) throw new Error("再試行する記事を確認してください。");
+  } else {
+    const selection = validateSelection(row.request.selection);
+    if (selection.range === "all" || selection.content !== row.kind) throw new Error("公開版で利用できない取得条件です。");
+    author = selection.authorId === ALL_AUTHORS_ID
+      ? groupSelectionAuthor(selection.group)
+      : (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId)!;
+    if (!author) throw new Error("公式一覧にない投稿者です。");
+    const loadPage = (page: number) => getArticlePage(selection.group, author.id, page);
+    articles = selection.range === "selected"
+      ? await verifySelectedArticles(selection, loadPage)
+      : await collectLatestArticles(selection.range === "latest-one" ? 1 : selection.count!, loadPage);
+    if (!articles.length) throw new Error("取得する記事が見つかりませんでした。");
+  }
+  return {
+    id: row.id, articleUrl: articles[0].url, kind: row.kind,
+    requestedArticles: articles, requestedAuthor: author,
+    status: "running", createdAt: row.created_at, updatedAt: row.updated_at,
+    outputDirectory, log: [], retryOfJobId: row.retry_of_job_id ?? undefined,
+  };
+}
+
+function safeState(job: LocalJob): Partial<LocalJob> {
+  const state: Partial<LocalJob> = { ...job };
+  delete state.outputDirectory;
+  return state;
+}
+
+async function uploadResults(job: LocalJob, generation: number, artifacts: ArtifactInput[]): Promise<void> {
+  const prefix = `${job.id}/${generation}`;
+  let photoBytes = 0;
+  if (job.kind === "photos") {
+    for (const article of job.photoArticles ?? []) {
+      for (const photo of article.photos) {
+        const file = path.join(job.outputDirectory, "photos", article.id, photo.name);
+        const size = (await stat(file)).size;
+        photoBytes += size;
+        if (photoBytes > MAX_OUTPUT_BYTES) throw new Error("写真の合計サイズが512 MBを超えました。");
+        artifacts.push(await uploadArtifact(file, {
+          kind: "photo", article_id: article.id, name: photo.name,
+          object_key: `${prefix}/photos/${article.id}/${photo.name}`, mime_type: photo.mimeType,
+        }));
+      }
+    }
+    if (job.photoZipReady) {
+      const file = path.join(job.outputDirectory, "photos.zip");
+      if ((await stat(file)).size > MAX_OUTPUT_BYTES) throw new Error("写真ZIPが512 MBを超えました。");
+      artifacts.push(await uploadArtifact(file, { kind: "photo_zip", object_key: `${prefix}/photos.zip`, mime_type: "application/zip" }));
+    }
+  } else if (job.blogZipReady) {
+    const file = path.join(job.outputDirectory, "blogs.zip");
+    if ((await stat(file)).size > MAX_OUTPUT_BYTES) throw new Error("ブログZIPが512 MBを超えました。");
+    artifacts.push(await uploadArtifact(file, { kind: "blog_zip", object_key: `${prefix}/blogs.zip`, mime_type: "application/zip" }));
+  }
+}
+
+async function runClaimed(row: PublicJobRow): Promise<void> {
+  const generation = row.lease_generation;
+  let outputDirectory: string | undefined;
+  const uploaded: ArtifactInput[] = [];
+  let lostLease = false;
+  let localJob: LocalJob | undefined;
+  const heartbeat = setInterval(() => {
+    void heartbeatPublicJob(row.id, workerId, generation).then((ok) => {
+      if (!ok) lostLease = true;
+    }).catch(() => { lostLease = true; });
+  }, 15_000);
+  heartbeat.unref();
+  try {
+    outputDirectory = await prepareWork();
+    localJob = await resolveJob(row, outputDirectory);
+    const initialProgress = await progressPublicJob(row.id, workerId, generation, safeState(localJob), localJob.requestedAuthor);
+    if (!initialProgress) throw new LeaseLostError();
+    const store: JobStore = {
+      create: async () => { throw new Error("公開ワーカーからジョブは作成できません。"); },
+      get: async () => localJob ?? null,
+      update: async (_id, change) => {
+        if (lostLease) throw new LeaseLostError();
+        localJob = { ...localJob!, ...change, updatedAt: new Date().toISOString() };
+        const ok = await progressPublicJob(row.id, workerId, generation, safeState(localJob), localJob.requestedAuthor);
+        if (!ok) { lostLease = true; throw new LeaseLostError(); }
+        return localJob;
+      },
+      failInterrupted: async () => {},
+    };
+    await new LocalJobRunner(store, undefined, { photoByteLimit: 500 * 1024 * 1024 }).executeOne(localJob);
+    if (lostLease || !(await heartbeatPublicJob(row.id, workerId, generation))) throw new LeaseLostError();
+    if (localJob.status === "succeeded" || localJob.status === "partial") {
+      await uploadResults(localJob, generation, uploaded);
+    }
+    if (lostLease || !(await heartbeatPublicJob(row.id, workerId, generation))) throw new LeaseLostError();
+    const status = ["succeeded", "partial"].includes(localJob.status) ? localJob.status as "succeeded" | "partial" : "failed";
+    const committed = await completePublicJob(row.id, workerId, generation, status, safeState(localJob), localJob.error ?? null, uploaded);
+    if (!committed) throw new LeaseLostError();
+    uploaded.length = 0;
+  } catch (error) {
+    if (!(error instanceof LeaseLostError) && !lostLease) {
+      const detail = error instanceof Error ? error.message : "";
+      const message = /^(ワーカーの空き容量|写真の|ブログZIP|取得する記事|公式一覧|公開版|再試行する記事)/.test(detail)
+        ? detail : "ワーカーが処理を完了できませんでした。再試行してください。";
+      await completePublicJob(row.id, workerId, generation, "failed", localJob ? safeState(localJob) : {}, message, []).catch(() => {});
+      console.error("Public job failed", { jobId: row.id, errorType: error instanceof Error ? error.name : "unknown" });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    await Promise.allSettled(uploaded.map((artifact) => deleteArtifact(artifact.object_key)));
+    if (outputDirectory) await rm(outputDirectory, { recursive: true, force: true });
+  }
+}
+
+async function runCatalog(row: CatalogQueryRow): Promise<void> {
+  const generation = row.lease_generation;
+  let lostLease = false;
+  const heartbeat = setInterval(() => {
+    void heartbeatCatalogQuery(row.id, workerId, generation).then((ok) => {
+      if (!ok) lostLease = true;
+    }).catch(() => { lostLease = true; });
+  }, 15_000);
+  heartbeat.unref();
+  try {
+    const result = await executeCatalogQuery(row.request);
+    if (lostLease) return;
+    await completeCatalogQuery(row.id, workerId, generation, result, null);
+  } catch (error) {
+    if (!lostLease) {
+      const message = error instanceof Error && /^(公式|対象外|記事一覧|ブログ|公開版)/.test(error.message)
+        ? error.message : "公式一覧を取得できませんでした。少し待って再試行してください。";
+      await completeCatalogQuery(row.id, workerId, generation, null, message).catch(() => {});
+    }
+  } finally { clearInterval(heartbeat); }
+}
+
+async function jobLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      const row = await claimPublicJob(workerId);
+      if (row) await runClaimed(row);
+      else await delay(5_000);
+    } catch (error) {
+      console.error("Worker polling failed", { errorType: error instanceof Error ? error.name : "unknown" });
+      await delay(10_000);
+    }
+  }
+}
+
+async function catalogLoop(): Promise<void> {
+  while (!stopping) {
+    try {
+      const row = await claimCatalogQuery(workerId);
+      if (row) await runCatalog(row);
+      else await delay(1_000);
+    } catch (error) {
+      console.error("Catalog polling failed", { errorType: error instanceof Error ? error.name : "unknown" });
+      await delay(10_000);
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  if (process.env.APP_MODE !== "public") throw new Error("APP_MODE=public を設定してください。");
+  await cleanOrphanWork();
+  process.on("SIGINT", () => { stopping = true; });
+  process.on("SIGTERM", () => { stopping = true; });
+  await Promise.all([jobLoop(), catalogLoop()]);
+}
+
+await main();
