@@ -8,6 +8,7 @@ async function database() {
   await db.exec("create role anon; create role authenticated; create role service_role bypassrls;");
   await db.exec(await readFile(new URL("../supabase/migrations/20261021130000_public_jobs.sql", import.meta.url), "utf8"));
   await db.exec(await readFile(new URL("../supabase/migrations/20261022120000_service_role_table_privileges.sql", import.meta.url), "utf8"));
+  await db.exec(await readFile(new URL("../supabase/migrations/20261023100000_cleanup_public_data.sql", import.meta.url), "utf8"));
   return db;
 }
 
@@ -40,6 +41,7 @@ test("service_role receives only required direct table privileges while RLS and 
       "complete_job(uuid,uuid,integer,text,jsonb,text,jsonb)", "enqueue_catalog_query(uuid,jsonb)",
       "claim_catalog_query(uuid)", "heartbeat_catalog_query(uuid,uuid,integer)",
       "complete_catalog_query(uuid,uuid,integer,jsonb,text)",
+      "cleanup_expired_public_data()",
     ];
     for (const signature of functions) {
       for (const role of ["service_role", "anon", "authenticated"]) {
@@ -59,6 +61,45 @@ test("service_role receives only required direct table privileges while RLS and 
       await assert.rejects(db.query("update public.access_sessions set expires_at=now() where id=$1", [created.rows[0].id]), /permission denied/);
       await assert.rejects(db.query("insert into public.worker_heartbeats(worker_id) values ('11111111-1111-4111-8111-111111111111')"), /permission denied/);
     } finally { await db.exec("reset role"); }
+  } finally { await db.close(); }
+});
+
+test("cleanup removes expired artifacts and unreferenced old owner data without exposing deletion privileges", async () => {
+  const db = await database();
+  try {
+    const oldSession = await db.query("insert into public.access_sessions(token_hash,expires_at) values ('cleanup-old',now()-interval '2 days') returning id");
+    const recentSession = await db.query("insert into public.access_sessions(token_hash,expires_at) values ('cleanup-current',now()+interval '1 day') returning id");
+    const oldOwner = oldSession.rows[0].id;
+    const currentOwner = recentSession.rows[0].id;
+    const oldJob = await db.query(`insert into public.jobs(owner_session_id,kind,status,request,finished_at)
+      values ($1,'blog','succeeded','{}',now()-interval '3 days') returning id`, [oldOwner]);
+    const retryJob = await db.query(`insert into public.jobs(owner_session_id,kind,status,request,finished_at,retry_of_job_id)
+      values ($1,'blog','failed','{}',now()-interval '3 days',$2) returning id`, [oldOwner, oldJob.rows[0].id]);
+    const recentJob = await db.query(`insert into public.jobs(owner_session_id,kind,status,request,finished_at)
+      values ($1,'blog','succeeded','{}',now()-interval '1 hour') returning id`, [currentOwner]);
+    await db.query(`insert into public.artifacts(job_id,lease_generation,kind,object_key,mime_type,byte_size,expires_at)
+      values ($1,1,'blog_zip',$2,'application/zip',1,now()-interval '1 hour'),
+             ($3,1,'blog_zip',$4,'application/zip',1,now()+interval '1 day'),
+             ($3,1,'photo_zip',$5,'application/zip',1,now()-interval '1 hour')`,
+      [oldJob.rows[0].id, `${oldJob.rows[0].id}/1/blogs.zip`, recentJob.rows[0].id,
+        `${recentJob.rows[0].id}/1/blogs.zip`, `${recentJob.rows[0].id}/1/photos.zip`]);
+    await db.query(`insert into public.catalog_queries(owner_session_id,request,status,updated_at)
+      values ($1,'{}','succeeded',now()-interval '3 days'),($2,'{}','succeeded',now())`, [oldOwner, currentOwner]);
+    await db.query("insert into public.worker_heartbeats(worker_id,last_seen_at) values ('11111111-1111-4111-8111-111111111111',now()-interval '3 days')");
+
+    await db.exec("set role service_role");
+    try {
+      await db.query("select public.cleanup_expired_public_data()");
+      await assert.rejects(db.query("delete from public.artifacts"), /permission denied/);
+    } finally { await db.exec("reset role"); }
+
+    for (const table of ["jobs", "artifacts", "catalog_queries", "access_sessions", "worker_heartbeats"]) {
+      const oldCount = await db.query(`select count(*)::int as count from public.${table}`);
+      assert.equal(oldCount.rows[0].count, table === "worker_heartbeats" ? 0 : 1, table);
+    }
+    const kept = await db.query("select id from public.jobs");
+    assert.equal(kept.rows[0].id, recentJob.rows[0].id);
+    assert.ok(retryJob.rows[0].id);
   } finally { await db.close(); }
 });
 

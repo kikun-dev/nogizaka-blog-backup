@@ -241,6 +241,11 @@ export async function recoverStaleJobs(): Promise<void> {
   if (error) throw error;
 }
 
+export async function cleanupPublicData(): Promise<void> {
+  const { error } = await db().rpc("cleanup_expired_public_data");
+  if (error) throw error;
+}
+
 export async function workerLastSeen(): Promise<string | null> {
   const { data, error } = await db().from("worker_heartbeats").select("last_seen_at")
     .order("last_seen_at", { ascending: false }).limit(1).maybeSingle();

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rm, stat, statfs } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { LocalJobRunner } from "../server/job-runner";
 import { executeCatalogQuery } from "../server/public-catalog-worker";
 import type { JobStore, LocalJob } from "../server/job-store";
 import {
-  claimPublicJob, completePublicJob, heartbeatPublicJob, progressPublicJob,
+  claimPublicJob, completePublicJob, heartbeatPublicJob, progressPublicJob, cleanupPublicData,
   claimCatalogQuery, heartbeatCatalogQuery, completeCatalogQuery,
   type ArtifactInput, type PublicJobRow, type CatalogQueryRow,
 } from "../server/public-store";
@@ -15,44 +15,13 @@ import { errorDiagnostic } from "./diagnostics";
 import { pollOnce } from "./poll";
 import { finishUploadedArtifacts } from "./artifact-lifecycle";
 import { resolvePublicJob } from "./resolve-job";
+import { cleanOrphanWork, prepareWork } from "./workspace";
 
 const MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
-const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 const workerId = randomUUID();
 let stopping = false;
 
 class LeaseLostError extends Error {}
-
-function workRoot(): string {
-  const configured = process.env.WORKER_OUTPUT_ROOT;
-  if (!configured || !path.isAbsolute(configured)) throw new Error("WORKER_OUTPUT_ROOT に絶対パスを設定してください。");
-  return path.join(configured, "sakamichi-worker");
-}
-
-async function prepareWork(): Promise<string> {
-  const root = workRoot();
-  await mkdir(root, { recursive: true });
-  const disk = await statfs(root);
-  if (disk.bavail * disk.bsize < MIN_FREE_BYTES) throw new Error("ワーカーの空き容量が2 GB未満です。保存先を確認してください。");
-  return mkdtemp(path.join(root, `job-${process.pid}-`));
-}
-
-async function cleanOrphanWork(): Promise<void> {
-  const root = workRoot();
-  await mkdir(root, { recursive: true });
-  // Older public worker versions created an unbounded cache outside job-*.
-  await rm(path.join(root, "_blog-cache"), { recursive: true, force: true });
-  for (const name of await readdir(root)) {
-    const match = /^job-(\d+)-[A-Za-z0-9]+$/.exec(name);
-    if (!match) continue;
-    try { process.kill(Number(match[1]), 0); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-        await rm(path.join(root, name), { recursive: true, force: true });
-      }
-    }
-  }
-}
 
 function safeState(job: LocalJob): Partial<LocalJob> {
   const state: Partial<LocalJob> = { ...job };
@@ -174,8 +143,14 @@ async function runCatalog(row: CatalogQueryRow): Promise<void> {
 }
 
 async function jobLoop(): Promise<void> {
+  let nextCleanupAt = 0;
   while (!stopping) {
     try {
+      if (Date.now() >= nextCleanupAt) {
+        nextCleanupAt = Date.now() + 60 * 60_000;
+        try { await cleanupPublicData(); }
+        catch (error) { console.error("Public data cleanup failed", errorDiagnostic(error)); }
+      }
       const handled = await pollOnce(() => claimPublicJob(workerId), runClaimed);
       if (!handled) await delay(5_000);
     } catch (error) {
