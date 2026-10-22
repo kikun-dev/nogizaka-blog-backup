@@ -48,7 +48,7 @@ export class LocalJobRunner implements JobRunner {
   constructor(
     private readonly store: JobStore,
     private readonly execute: (job: LocalJob) => Promise<void> = (job) => this.run(job),
-    private readonly backupOptions?: { services?: FullBackupServices; jobServices?: JobServices; articleLimit?: number; byteLimit?: number; photoByteLimit?: number },
+    private readonly backupOptions?: { services?: FullBackupServices; jobServices?: JobServices; articleLimit?: number; byteLimit?: number; photoByteLimit?: number; cacheResults?: boolean },
   ) {}
 
   // The public worker claims jobs in Postgres and executes the same acquisition
@@ -250,6 +250,7 @@ export class LocalJobRunner implements JobRunner {
         articles: job.requestedArticles ?? [{ url: job.articleUrl }],
         output: job.outputDirectory,
         author: job.requestedAuthor,
+        cacheResults: this.backupOptions?.cacheResults ?? true,
       }, {
         logger: { log: (line: string) => { log.push(line); }, warn: (line: string) => { log.push(line); } },
         continueOnError: true,

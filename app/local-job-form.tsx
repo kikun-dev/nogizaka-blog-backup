@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LocalJob } from "@/server/job-store";
-import type { SelectionRequest } from "@/lib/selection";
+import type { SelectionSubmission } from "@/lib/selection";
 import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, serializePreferences, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
 import { canShowPhotoGallery } from "@/lib/photo-gallery-visibility";
 import { clearRecentPublicJob, restoreRecentPublicJob, saveRecentPublicJob } from "@/lib/recent-public-job";
@@ -211,7 +211,7 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
     }
   }
 
-  async function submitBlogJob(selection: SelectionRequest) {
+  async function submitBlogJob(selection: SelectionSubmission) {
     if (busy || submittingRef.current) return;
     submittingRef.current = true;
     setView("blog");
@@ -287,7 +287,7 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
     } finally { setSubmitting(false); }
   }
 
-  async function submitPhotoJob(selection: SelectionRequest) {
+  async function submitPhotoJob(selection: SelectionSubmission) {
     if (busy || submittingRef.current) return;
     submittingRef.current = true;
     setView("photos");

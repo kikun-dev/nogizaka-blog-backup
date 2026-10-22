@@ -3,6 +3,8 @@ import { checkWriteOrigin, requirePublicSession } from "./public-access";
 import { enqueuePublicJob, getArtifact, getOwnedPublicJob, publicJobView, recoverStaleJobs, workerLastSeen } from "./public-store";
 import { signedArtifactUrl } from "./public-r2";
 import { publicZipFilename } from "./public-download-name";
+import { confirmedJobRequest } from "./public-confirmation";
+import { getCatalogQuery } from "./public-store";
 
 function submissionError(error: unknown): Response {
   const message = error instanceof Error ? error.message : "ジョブを作成できませんでした。";
@@ -22,19 +24,30 @@ export async function submitPublicSelection(request: Request, kind: SelectionCon
   const session = await requirePublicSession(request);
   if ("denied" in session) return session.denied;
   let selection;
+  let confirmationId: string;
   try {
     const raw = await request.text();
     if (raw.length > 64_000) return Response.json({ error: "取得条件が大きすぎます。" }, { status: 413 });
-    selection = validateSelection(JSON.parse(raw));
+    const input = JSON.parse(raw) as Record<string, unknown>;
+    selection = validateSelection(input);
+    if (typeof input.confirmationId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.confirmationId)) {
+      throw new SelectionError("取得条件をもう一度確認してください。");
+    }
+    confirmationId = input.confirmationId;
     if (selection.content !== kind) throw new SelectionError("保存内容を確認してください。");
     if (selection.range === "all") throw new SelectionError("公開版では全件バックアップを利用できません。");
   } catch (error) {
     return Response.json({ error: error instanceof SelectionError ? error.message : "取得条件を確認してください。" }, { status: 400 });
   }
   try {
-    const row = await enqueuePublicJob(session.id, kind, { selection });
+    const confirmation = await getCatalogQuery(confirmationId, session.id);
+    const frozen = confirmedJobRequest(selection, confirmation);
+    const row = await enqueuePublicJob(session.id, kind, frozen);
     return Response.json({ job: publicJobView(row) }, { status: 202, headers: { "Cache-Control": "no-store" } });
-  } catch (error) { return submissionError(error); }
+  } catch (error) {
+    if (error instanceof SelectionError) return Response.json({ error: error.message }, { status: 409 });
+    return submissionError(error);
+  }
 }
 
 export async function publicJobStatus(request: Request, id: string): Promise<Response> {

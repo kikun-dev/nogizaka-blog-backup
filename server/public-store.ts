@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { BlogAuthor } from "@/lib/catalog/types";
+import type { BlogArticle, BlogAuthor } from "@/lib/catalog/types";
 import type { SelectionRequest } from "@/lib/selection";
 import type { LocalJob } from "./job-store";
 
 export type PublicRequest =
   | { selection: SelectionRequest }
+  | { selection: SelectionRequest; confirmedArticles: BlogArticle[]; confirmedAuthor: BlogAuthor }
   | { retryArticles: NonNullable<LocalJob["requestedArticles"]>; author: BlogAuthor };
 
 export type PublicJobRow = {
@@ -51,6 +52,7 @@ export type CatalogQueryRow = {
   error: string | null;
   lease_owner: string | null;
   lease_generation: number;
+  created_at: string;
 };
 
 let client: SupabaseClient | undefined;

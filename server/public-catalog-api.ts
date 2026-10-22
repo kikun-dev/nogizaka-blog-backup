@@ -15,7 +15,9 @@ export async function publicCatalogResponse(request: Request, query: CatalogQuer
     while (Date.now() < deadline) {
       const current = await getCatalogQuery(queued.id, session.id);
       if (current?.status === "succeeded" && current.result) {
-        return Response.json(current.result, { headers: { "Cache-Control": "no-store" } });
+        return Response.json(query.kind === "selection"
+          ? { ...current.result, confirmationId: queued.id } : current.result,
+        { headers: { "Cache-Control": "no-store" } });
       }
       if (current?.status === "failed") {
         return Response.json({ error: current.error ?? "公式一覧を取得できませんでした。" }, { status: 502 });

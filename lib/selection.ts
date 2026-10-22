@@ -16,6 +16,8 @@ export type SelectionRequest = {
   articles?: SelectedArticle[];
 };
 
+export type SelectionSubmission = SelectionRequest & { confirmationId?: string };
+
 export type SelectionPlan = SelectionRequest & {
   author: BlogAuthor;
   maxArticles: number;
