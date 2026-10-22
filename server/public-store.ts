@@ -24,6 +24,7 @@ export type PublicJobRow = {
   lease_expires_at: string | null;
   created_at: string;
   updated_at: string;
+  finished_at: string | null;
   error: string | null;
   retry_of_job_id: string | null;
 };

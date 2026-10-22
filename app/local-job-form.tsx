@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LocalJob } from "@/server/job-store";
 import type { SelectionRequest } from "@/lib/selection";
 import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, serializePreferences, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
+import { canShowPhotoGallery } from "@/lib/photo-gallery-visibility";
+import { clearRecentPublicJob, restoreRecentPublicJob, saveRecentPublicJob } from "@/lib/recent-public-job";
 import { AcquisitionPlanner } from "./acquisition-planner";
 import { PhotoGallery } from "./photo-gallery";
 import { RemoveSavedItemButton } from "./remove-saved-item-button";
@@ -38,9 +40,11 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   const previousPhotoStatus = useRef<LocalJob["status"] | undefined>(undefined);
   const submittingRef = useRef(false);
+  const sessionCheckVersion = useRef(0);
   const activeJobId = job?.id;
   const activeStatus = job?.status;
   const busy = submitting || activeStatus === "queued" || activeStatus === "running";
+  const photoGalleryReady = canShowPhotoGallery(job, publicMode);
 
   function updatePreferencesPreview(next: LocalPreferences) {
     setPreferencesPreview(next);
@@ -81,34 +85,50 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
     if (previousView.current === view) return;
     previousView.current = view;
     const section = view === "photos"
-      ? job?.kind === "photos" && job.photoArticles ? galleryRef.current : resultRef.current
+      ? photoGalleryReady ? galleryRef.current : resultRef.current
       : setupRef.current;
     const target = view === "blog" ? resultRef.current : section;
     const heading = view === "setup" ? setupHeadingRef.current : resultHeadingRef.current;
     const frame = window.requestAnimationFrame(() => target?.scrollIntoView({ block: "start", behavior: "auto" }));
     heading?.focus({ preventScroll: true });
     return () => window.cancelAnimationFrame(frame);
-  }, [view, job?.kind, job?.photoArticles]);
+  }, [view, photoGalleryReady]);
 
   useEffect(() => {
     const status = job?.kind === "photos" ? job.status : undefined;
     let frame: number | undefined;
-    if (view === "photos" && job?.kind === "photos" && job.photoArticles
+    if (view === "photos" && photoGalleryReady
       && (status === "succeeded" || status === "partial" || status === "failed") && previousPhotoStatus.current !== status) {
       frame = window.requestAnimationFrame(() => galleryRef.current?.scrollIntoView({ block: "start", behavior: "auto" }));
     }
     previousPhotoStatus.current = status;
     return () => { if (frame !== undefined) window.cancelAnimationFrame(frame); };
-  }, [job, view]);
+  }, [job, view, photoGalleryReady]);
 
   useEffect(() => {
     if (!publicMode) return;
     let active = true;
-    void fetch("/api/access-session", { cache: "no-store" }).then((response) => response.json())
-      .then((data: { authenticated?: boolean }) => { if (active && data.authenticated) setReadyToken("public-session"); })
-      .catch(() => {});
+    const version = ++sessionCheckVersion.current;
+    void (async () => {
+      const restored = await restoreRecentPublicJob(window.localStorage, fetch);
+      if (!active || version !== sessionCheckVersion.current) return;
+      if (restored.authenticated) setReadyToken("public-session");
+      if (restored.job) {
+        setJob(restored.job);
+        setWorkerOffline(restored.workerOffline);
+        setView(restored.job.kind === "photos" ? "photos" : "blog");
+      }
+    })().catch((error: unknown) => {
+      if (active && version === sessionCheckVersion.current) {
+        setMessage(error instanceof Error ? error.message : "アクセス状態を確認できませんでした。");
+      }
+    });
     return () => { active = false; };
   }, [publicMode]);
+
+  useEffect(() => {
+    if (publicMode && job?.id) saveRecentPublicJob(window.localStorage, job.id);
+  }, [publicMode, job?.id]);
 
   useEffect(() => {
     if (publicMode) return;
@@ -118,6 +138,7 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
   }, [accessToken, publicMode]);
 
   async function loginPublic() {
+    sessionCheckVersion.current++;
     setMessage("");
     try {
       const response = await fetch("/api/access-session", {
@@ -125,6 +146,8 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
       });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error ?? "アクセスできませんでした。");
+      clearRecentPublicJob(window.localStorage);
+      setJob(null);
       setAccessToken("");
       setReadyToken("public-session");
     } catch (error) { setMessage(error instanceof Error ? error.message : "アクセスできませんでした。"); }
@@ -139,6 +162,12 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
           headers: { Authorization: `Bearer ${accessToken}` },
         });
         if (!response.ok) {
+          if (publicMode && response.status === 401) {
+            clearRecentPublicJob(window.localStorage);
+            setReadyToken("");
+            setJob(null);
+            setView("setup");
+          }
           const failure = await response.json().catch(() => ({})) as { error?: string };
           throw new Error(failure.error ?? "状態を確認できませんでした。画面を再読み込みしてください。");
         }
@@ -151,7 +180,7 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
       }
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [activeJobId, activeStatus, accessToken]);
+  }, [activeJobId, activeStatus, accessToken, publicMode]);
 
   async function submitJob(articleUrl: string) {
     if (busy || submittingRef.current) return;
@@ -421,8 +450,8 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
         {(job.status === "queued" || job.status === "running") && <p>写真を取得しています。完了するとこの画面に表示します。</p>}
         {job.error && <p className="form-message">{job.error}</p>}
       </div>}
-      {view === "photos" && job?.kind === "photos" && job.photoArticles && <div ref={galleryRef} className="photo-gallery-anchor"><PhotoGallery job={job} /></div>}
-      {job && (view === "blog" || job.photoArticles) && <button type="button" className="secondary-button photo-back-bottom" onClick={() => setView("setup")}>条件設定に戻る</button>}
+      {view === "photos" && photoGalleryReady && job && <div ref={galleryRef} className="photo-gallery-anchor"><PhotoGallery job={job} /></div>}
+      {job && (view === "blog" || photoGalleryReady) && <button type="button" className="secondary-button photo-back-bottom" onClick={() => setView("setup")}>条件設定に戻る</button>}
     </section>
     </>
   );

@@ -42,10 +42,14 @@ export async function deleteArtifact(key: string): Promise<void> {
   await r2().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
 }
 
-export async function signedArtifactUrl(key: string, filename?: string): Promise<string> {
-  const disposition = filename
-    ? `attachment; filename="download.zip"; filename*=UTF-8''${encodeURIComponent(filename)}`
+export function artifactContentDisposition(filename?: { unicode: string; ascii: string }): string {
+  return filename
+    ? `attachment; filename="${filename.ascii}"; filename*=UTF-8''${encodeURIComponent(filename.unicode)}`
     : "inline";
+}
+
+export async function signedArtifactUrl(key: string, filename?: { unicode: string; ascii: string }): Promise<string> {
+  const disposition = artifactContentDisposition(filename);
   return getSignedUrl(r2(), new GetObjectCommand({
     Bucket: bucket(), Key: key, ResponseContentDisposition: disposition,
   }), { expiresIn: 300 });

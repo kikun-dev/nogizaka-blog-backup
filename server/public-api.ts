@@ -2,6 +2,7 @@ import { validateSelection, SelectionError, type SelectionContent } from "@/lib/
 import { checkWriteOrigin, requirePublicSession } from "./public-access";
 import { enqueuePublicJob, getArtifact, getOwnedPublicJob, publicJobView, recoverStaleJobs, workerLastSeen } from "./public-store";
 import { signedArtifactUrl } from "./public-r2";
+import { publicZipFilename } from "./public-download-name";
 
 function submissionError(error: unknown): Response {
   const message = error instanceof Error ? error.message : "ジョブを作成できませんでした。";
@@ -86,7 +87,7 @@ export async function publicArtifactRedirect(request: Request, id: string,
   }
   const artifact = await getArtifact(id, kind, articleId, name);
   if (!artifact) return Response.json({ error: "成果物の保存期限が切れたか、見つかりません。" }, { status: 404 });
-  const filename = kind === "photo" ? undefined : `sakamichi-${kind === "blog_zip" ? "blogs" : "photos"}-${id}.zip`;
+  const filename = kind === "photo" ? undefined : publicZipFilename(job);
   const url = await signedArtifactUrl(artifact.object_key, filename);
   return new Response(null, { status: 302, headers: {
     Location: url, "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
