@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "archive": "node archive-sakamichi-blog.mjs",
     "check": "node --check archive-sakamichi-blog.mjs",
-    "test": "npm run check && npm run typecheck && node --import tsx --test tests/public-runtime.test.ts tests/public-client-state.test.ts && node --import tsx --test tests/public-worker-poll.test.ts && node --test tests/public-db.mjs && node --experimental-transform-types tests/job-safety.mjs && node tests/archive-engine.mjs && node --experimental-transform-types tests/catalog.mjs && node --experimental-transform-types tests/selection.mjs && node --experimental-transform-types tests/local-preferences.mjs && node --experimental-transform-types tests/photos.mjs && node --experimental-transform-types tests/blog-zip.mjs"
+    "test": "npm run check && npm run typecheck && node --import tsx --test tests/public-runtime.test.ts tests/public-client-state.test.ts && node --import tsx --test tests/public-worker-poll.test.ts && node --test tests/public-db.mjs && node --experimental-transform-types tests/job-safety.mjs && node tests/archive-engine.mjs && node --experimental-transform-types tests/catalog.mjs && node --experimental-transform-types tests/selection.mjs && node --experimental-transform-types tests/local-preferences.mjs && node --import tsx tests/photos.mjs && node --experimental-transform-types tests/blog-zip.mjs"
   },
   "repository": {
     "type": "git",

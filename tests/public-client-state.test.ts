@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { canShowPhotoGallery } from "../lib/photo-gallery-visibility";
 import { RECENT_PUBLIC_JOB_KEY, restoreRecentPublicJob, saveRecentPublicJob } from "../lib/recent-public-job";
 import { artifactContentDisposition } from "../server/public-r2";
-import { publicZipFilename, safeFilenamePart } from "../server/public-download-name";
+import { publicZipFilename } from "../server/public-download-name";
+import { safeFilenamePart } from "../lib/safe-filename-part";
 import type { LocalJob } from "../server/job-store";
 import type { PublicJobRow } from "../server/public-store";
 
