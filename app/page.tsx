@@ -8,7 +8,6 @@ export default function Home() {
       <header className="site-header">
         <Image className="brand-mark" src="/icon.png" alt="" width={35} height={35} priority />
         <div className="brand-name">SakaClip<small>坂道ブログ保存ツール</small></div>
-        <span className="local-badge">{publicMode ? "WEB" : "LOCAL"}</span>
       </header>
 
       <div className="content">

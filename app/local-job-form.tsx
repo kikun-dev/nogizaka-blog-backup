@@ -349,7 +349,7 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
     <>
     {view === "setup" && <div className="intro">
       <p className="intro-groups">乃木坂46・櫻坂46・日向坂46</p>
-      <h1>写真とブログを保存</h1>
+      <h1>ブログと写真を残す</h1>
       <p>
         公式サイトの記事一覧から投稿者と取得範囲を選べます。写真は画面で表示・保存でき、ブログはZIPにまとめてダウンロードできます。
       </p>
