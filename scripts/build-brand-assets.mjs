@@ -87,15 +87,32 @@ const ogBackground = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width=
   <rect width="1200" height="630" fill="url(#bg)"/>
   <circle cx="210" cy="100" r="430" fill="url(#glow)"/>
   <rect x="32" y="32" width="1136" height="566" rx="36" fill="none" stroke="#ffffff" stroke-opacity=".17" stroke-width="2"/>
-  <text x="505" y="216" fill="#ffffff" font-family="DejaVu Sans,sans-serif" font-size="85" font-weight="bold">SakaClip</text>
-  <text x="507" y="275" fill="#dbe9ff" font-family="IPAGothic,sans-serif" font-size="32">坂道ブログ保存ツール</text>
-  <text x="507" y="361" fill="#ffffff" font-family="IPAGothic,sans-serif" font-size="26">乃木坂46・櫻坂46・日向坂46の</text>
-  <text x="507" y="405" fill="#ffffff" font-family="IPAGothic,sans-serif" font-size="26">公式ブログから写真・ブログを保存</text>
   <rect x="505" y="466" width="286" height="54" rx="27" fill="#ffffff" fill-opacity=".13"/>
-  <text x="527" y="501" fill="#ffffff" font-family="IPAGothic,sans-serif" font-size="21">非公式・個人制作ツール</text>
 </svg>`);
 const logo = await resized(350);
-const ogImage = await sharp(ogBackground).composite([{ input: logo, left: 92, top: 140 }]).png().toBuffer();
+// sharp's text input loads the bundled files directly, so regenerating the
+// PNGs does not depend on fonts installed on the host operating system.
+async function renderedText(text, size, color, fontfile, family) {
+  return sharp({ text: {
+    text: `<span foreground="${color}">${text}</span>`,
+    font: `${family} ${size}`,
+    fontfile: path.join(root, `assets/brand/fonts/${fontfile}`),
+    rgba: true,
+  } }).png().toBuffer();
+}
+const englishFont = ["DejaVuSans-Bold.ttf", "DejaVu Sans Bold"];
+const japaneseFont = ["ipag.ttf", "IPAGothic"];
+const lines = [
+  ["SakaClip", 85, "#ffffff", englishFont, 505, 145],
+  ["坂道ブログ保存ツール", 32, "#dbe9ff", japaneseFont, 507, 244],
+  ["乃木坂46・櫻坂46・日向坂46の", 26, "#ffffff", japaneseFont, 507, 336],
+  ["公式ブログから写真・ブログを保存", 26, "#ffffff", japaneseFont, 507, 380],
+  ["非公式・個人制作ツール", 21, "#ffffff", japaneseFont, 527, 478],
+];
+const textLayers = await Promise.all(lines.map(async ([text, size, color, [fontfile, family], left, top]) => ({
+  input: await renderedText(text, size, color, fontfile, family), left, top,
+})));
+const ogImage = await sharp(ogBackground).composite([{ input: logo, left: 92, top: 140 }, ...textLayers]).png().toBuffer();
 await writeFile(path.join(root, "app/opengraph-image.png"), ogImage);
 await writeFile(path.join(root, "app/twitter-image.png"), ogImage);
 

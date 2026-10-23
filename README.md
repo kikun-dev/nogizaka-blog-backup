@@ -4,6 +4,8 @@ SakaClip は、乃木坂46・櫻坂46・日向坂46の公式ブログを保存�
 
 ブランド画像の原画は `assets/brand/SakaClip_icon_selected_original.png` です。アイコンと共有プレビュー画像は `npm run brand:build` で原画から再生成できます。原画のSC・クリップ・グラデーションを保持し、外側の白い余白だけを取り除いています。
 
+共有画像の再生成には `assets/brand/fonts/` に同梱した IPA Gothic と DejaVu Sans Bold を使用します。各フォントのライセンス文書も同じディレクトリに置いています。
+
 共有プレビュー画像の絶対URLにはVercelのシステム環境変数を使います。独自ドメインなどを明示したい場合のみ、Web環境に `SITE_URL`（例: `https://example.com`）を設定します。ワーカー側には不要です。
 
 ## 必要な環境
