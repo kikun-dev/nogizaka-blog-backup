@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkWriteOrigin, isPublicMode, loginWithAccessCode } from "../server/public-access";
+import { catalogErrorResponse } from "../server/public-catalog-api";
 
 test("public access mode does not accept the retired shared environment code", async () => {
   const mode = process.env.APP_MODE;
@@ -36,6 +37,13 @@ test("cross-origin state changes are rejected", () => {
   assert.equal(checkWriteOrigin(new Request("https://app.example/api/blog-jobs", {
     method: "POST", headers: { Origin: "https://app.example" },
   })), null);
+});
+
+test("catalog access expiration errors are reported as authentication failures", async () => {
+  const response = catalogErrorResponse(new Error("session_expired"));
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), { error: "アクセスコードを入力してください。" });
 });
 
 test("public legacy routes cannot start the local runner", async () => {

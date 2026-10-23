@@ -2,6 +2,19 @@ import { setTimeout as delay } from "node:timers/promises";
 import { requirePublicSession } from "./public-access";
 import { enqueueCatalogQuery, getCatalogQuery, workerLastSeen, type CatalogQueryRequest } from "./public-store";
 
+export function catalogErrorResponse(error: unknown): Response {
+  const message = error instanceof Error ? error.message : "";
+  if (/session_expired/.test(message)) {
+    return Response.json({ error: "アクセスコードを入力してください。" }, {
+      status: 401, headers: { "Cache-Control": "no-store" },
+    });
+  }
+  if (/catalog_.*capacity/.test(message)) {
+    return Response.json({ error: "一覧取得が混み合っています。少し待って再試行してください。" }, { status: 429 });
+  }
+  return Response.json({ error: "一覧取得の保存先に接続できません。管理者に確認してください。" }, { status: 503 });
+}
+
 export async function publicCatalogResponse(request: Request, query: CatalogQueryRequest): Promise<Response> {
   const session = await requirePublicSession(request);
   if ("denied" in session) return session.denied;
@@ -26,10 +39,6 @@ export async function publicCatalogResponse(request: Request, query: CatalogQuer
     }
     return Response.json({ error: "一覧取得を待っています。少し待って再試行してください。" }, { status: 503 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (/catalog_.*capacity/.test(message)) {
-      return Response.json({ error: "一覧取得が混み合っています。少し待って再試行してください。" }, { status: 429 });
-    }
-    return Response.json({ error: "一覧取得の保存先に接続できません。管理者に確認してください。" }, { status: 503 });
+    return catalogErrorResponse(error);
   }
 }
