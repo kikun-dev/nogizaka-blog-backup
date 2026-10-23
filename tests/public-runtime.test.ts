@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkWriteOrigin, isPublicMode, loginWithAccessCode } from "../server/public-access";
-import { catalogErrorResponse } from "../server/public-catalog-api";
+import { catalogErrorResponse, terminalCatalogResponse } from "../server/public-catalog-api";
+import type { CatalogQueryRow } from "../server/public-store";
 
 test("public access mode does not accept the retired shared environment code", async () => {
   const mode = process.env.APP_MODE;
@@ -44,6 +45,18 @@ test("catalog access expiration errors are reported as authentication failures",
   assert.equal(response.status, 401);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(await response.json(), { error: "アクセスコードを入力してください。" });
+});
+
+test("terminal catalog results are withheld after the session or code is revoked", async () => {
+  const row = {
+    id: "11111111-1111-4111-8111-111111111111", owner_session_id: "22222222-2222-4222-8222-222222222222",
+    request: { kind: "authors", group: "nogizaka" }, status: "failed", result: null, error: "revoked",
+    lease_owner: null, lease_generation: 1, created_at: new Date().toISOString(),
+  } as unknown as CatalogQueryRow;
+  const response = await terminalCatalogResponse(row, row.owner_session_id,
+    { kind: "authors", group: "nogizaka" }, async () => false);
+  assert.equal(response?.status, 401);
+  assert.deepEqual(await response?.json(), { error: "アクセスコードを入力してください。" });
 });
 
 test("public legacy routes cannot start the local runner", async () => {
