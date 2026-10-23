@@ -100,6 +100,8 @@ npm run build
 
 公開モードは Next.js Web/API、Supabase、Cloudflare R2、`npm run worker` の4要素で構成します。Web は Vercel、ワーカーは当面 WSL2 上で動かします。メンバー・記事一覧の取得も Supabase 経由でワーカーへ依頼するため、公開 Web API では Playwright を起動しません。ワーカーは Supabase へ外向きに接続するため、開発 PC のポート開放は不要です。OCI へ移す場合も同じワーカーと環境変数を使えます。
 
+友人へ公開する際の使い方と注意事項は [友人向け利用案内](docs/friend-guide.md) にまとめています。アクセスコードは案内文とは別に本人へ渡してください。
+
 1. `supabase/migrations/` の SQL をレビューし、Supabase CLI の `db push` で対象プロジェクトへ未適用分を適用します。リモートの SQL Editor で別途テーブルを作らないでください。`20261022120000_service_role_table_privileges.sql` は、Web とワーカーが直接使うテーブルの最小権限を `service_role` に付与します。
 2. `.env.example` の公開モード用変数を、Vercel とワーカーのそれぞれに設定します。`SUPABASE_SECRET_KEY` と R2 のキーはブラウザ向け変数にしません。Vercel にはバケット限定の Object Read キーを別に作成して設定し、ワーカーには既存の Object Read & Write キーを設定します。
    Vercel のプロジェクト設定では Node.js 24.x を選びます。`package.json` の `engines.node` も24.xを指定しています。デプロイの Build Logs で Node.js の版を確認し、24系の最新セキュリティパッチが使われていることを確かめます。
@@ -132,4 +134,4 @@ npm run access-codes -- revoke <UUID>
 
 ロールバックで旧環境変数を戻したり、既存セッションを再有効化したりしないでください。DB migrationは安全上ロールバックせず、問題時はメンテナンス状態を保って前方修正したアプリを再デプロイします。旧コードと既存セッションは復元されません。migration後に旧アプリへ戻した場合も、旧アプリが発行するセッションは期限切れとなりログインは失敗します。
 
-Vercel Authentication はアプリ側のアクセスコードと所有者確認を検証するまで解除しません。共有先でのスマホ Safari の写真長押し保存と ZIP 取得は、その後に確認します。Supabase Free は低利用が続くと休止する場合があります。その場合はプロジェクトを再開してからワーカーを起動します。
+Vercel Authentication を解除して友人に公開する前に、アプリ側のアクセスコードと所有者確認を検証します。解除後も、未ログインの API・成果物アクセス拒否と他利用者のジョブへのアクセス拒否を公開 URL で再確認します。Supabase Free は低利用が続くと休止する場合があります。その場合はプロジェクトを再開してからワーカーを起動します。
