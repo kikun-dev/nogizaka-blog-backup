@@ -348,11 +348,10 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
   return (
     <>
     {view === "setup" && <div className="intro">
-      <p className="intro-caption">坂道46 公式ブログ</p>
-      <h1>大切なブログを、<br className="mobile-break" />手元に残す。</h1>
+      <p className="intro-groups">乃木坂46・櫻坂46・日向坂46</p>
+      <h1>写真とブログを保存</h1>
       <p>
-        乃木坂46・櫻坂46・日向坂46の公式ブログを保存するためのツールです。
-        公式サイトの一覧からメンバーと取得範囲を選べます。写真の閲覧・保存と、ブログの複数件{publicMode ? "" : "・全件バックアップ"}ができます。
+        公式サイトの記事一覧から投稿者と取得範囲を選べます。写真は画面で表示・保存でき、ブログはZIPにまとめてダウンロードできます。
       </p>
     </div>}
     <section ref={setupRef} className="workspace" aria-labelledby="workspace-title" hidden={view !== "setup"}>
