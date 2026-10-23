@@ -38,18 +38,13 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   border-bottom: 1px solid var(--line);
 }
 .brand-mark {
-  display: grid;
-  place-items: center;
+  display: block;
+  flex: none;
   width: 35px;
   height: 35px;
-  border-radius: 8px;
-  background: var(--primary);
-  color: white;
-  font-size: 18px;
-  font-weight: 750;
-  line-height: 1;
 }
-.brand-name { font-weight: 700; letter-spacing: -.01em; }
+.brand-name { display: flex; flex-direction: column; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; }
+.brand-name small { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; }
 .local-badge {
   margin-left: auto;
   border: 1px solid var(--line);
