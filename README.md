@@ -10,16 +10,21 @@ SakaClip は、乃木坂46・櫻坂46・日向坂46の公式ブログを保存�
 
 ## 必要な環境
 
-- Node.js 24
+- Node.js 24.22.1（`.nvmrc` 指定。Vercel は `engines.node: 24.x` で24系を選び、パッチを自動適用）
 - npm（Node.js 24 に付属する版）
 - Playwright Chromium
 
 ## セットアップ
 
 ```bash
+nvm install
+nvm use
+node --version
 npm install
 npx playwright install chromium
 ```
+
+Node.jsをnvm以外で管理する場合も、公式のNode.js 24.22.1以降の24系LTSを使用してください。公開ワーカーを動かすWSLでも `node --version` が修正版を示すことを確認してから、依存関係を再インストールしてワーカーを再起動します。
 
 `.env.example` を参考に `.env.local` を作成し、`LOCAL_ACCESS_TOKEN` に推測されにくいランダムな値を設定してください。例: `openssl rand -hex 32`。この値は Git に登録せず、ブラウザの「ローカルアクセストークン」欄に入力します。
 
@@ -97,6 +102,7 @@ npm run build
 
 1. `supabase/migrations/` の SQL をレビューし、Supabase CLI の `db push` で対象プロジェクトへ未適用分を適用します。リモートの SQL Editor で別途テーブルを作らないでください。`20261022120000_service_role_table_privileges.sql` は、Web とワーカーが直接使うテーブルの最小権限を `service_role` に付与します。所有セッションが失効した待機ジョブは、ワーカーが獲得する前に失敗扱いにします。
 2. `.env.example` の公開モード用変数を、Vercel とワーカーのそれぞれに設定します。`SUPABASE_SECRET_KEY` と R2 のキーはブラウザ向け変数にしません。Vercel にはバケット限定の Object Read キーを別に作成して設定し、ワーカーには既存の Object Read & Write キーを設定します。
+   Vercel のプロジェクト設定では Node.js 24.x を選びます。`package.json` の `engines.node` も24.xを指定しています。デプロイの Build Logs で Node.js の版を確認し、24系の最新セキュリティパッチが使われていることを確かめます。
 3. WSL2 では `WORKER_OUTPUT_ROOT` に空き容量のある絶対パスを指定します。ワーカーは開始前に2 GB以上の空き容量を確認し、専用の `sakamichi-worker` サブディレクトリだけを一時領域として使用します。実行中は `npm run worker` を起動したままにします。Web を更新したらワーカーも同じコミットへ更新して再起動してください。古いワーカーは確認済み記事の固定処理に対応していません。
 4. まず `APP_MODE=public` のローカル Web とワーカーで、最新1件の写真、少数記事のブログ、ZIPを確認します。成果物はジョブ完了から24時間後にアプリから利用不可になり、設定済みのR2削除ルールで後から削除されます。
 
