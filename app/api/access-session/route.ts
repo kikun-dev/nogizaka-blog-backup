@@ -1,4 +1,4 @@
-import { checkWriteOrigin, isPublicMode, loginWithSharedCode, requirePublicSession } from "@/server/public-access";
+import { checkWriteOrigin, isPublicMode, loginWithAccessCode, requirePublicSession } from "@/server/public-access";
 
 export const runtime = "nodejs";
 
@@ -18,5 +18,5 @@ export async function POST(request: Request) {
   let code: unknown;
   try { code = (JSON.parse(raw) as { code?: unknown }).code; }
   catch { return Response.json({ error: "入力を確認してください。" }, { status: 400 }); }
-  return loginWithSharedCode(code, request);
+  return loginWithAccessCode(code, request);
 }

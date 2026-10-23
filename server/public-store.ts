@@ -133,21 +133,26 @@ export function tokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function createAccessSession(): Promise<{ id: string; token: string }> {
+export async function authenticateAccessCode(codeHash: string, rateKey: string): Promise<{ id: string; token: string } | null> {
   const token = randomBytes(32).toString("base64url");
-  const { data, error } = await db().from("access_sessions")
-    .insert({ token_hash: tokenHash(token), expires_at: new Date(Date.now() + 24 * 3600_000).toISOString() })
-    .select("id").single();
-  if (error || !data) throw error ?? new Error("セッションを作成できませんでした。");
-  return { id: data.id as string, token };
+  const { data, error } = await db().rpc("authenticate_access_code", {
+    p_code_hash: codeHash, p_token_hash: tokenHash(token), p_rate_key: rateKey,
+  });
+  if (error) throw error;
+  return data ? { id: data as string, token } : null;
 }
 
 export async function findAccessSession(token: string): Promise<string | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
-  const { data, error } = await db().from("access_sessions").select("id")
-    .eq("token_hash", tokenHash(token)).gt("expires_at", new Date().toISOString()).maybeSingle();
+  const { data, error } = await db().rpc("find_access_session", { p_token_hash: tokenHash(token) });
   if (error) throw error;
-  return data?.id ?? null;
+  return (data as string | null) ?? null;
+}
+
+export async function isActiveAccessSession(id: string): Promise<boolean> {
+  const { data, error } = await db().rpc("session_has_active_code", { p_session_id: id });
+  if (error) throw error;
+  return data === true;
 }
 
 export async function enqueuePublicJob(ownerId: string, kind: "blog" | "photos", request: PublicRequest, retryOf?: string): Promise<PublicJobRow> {
