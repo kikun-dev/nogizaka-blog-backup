@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import { localJobStore } from "@/server/job-store";
-import { localJobRunner } from "@/server/job-runner";
 import { checkLocalAccess } from "@/server/local-access";
 import { blogSessionCookie } from "@/server/blog-session";
+import { isPublicMode } from "@/server/public-access";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (isPublicMode()) return (await import("@/server/public-api")).publicJobStatus(request, (await context.params).id);
   const denied = checkLocalAccess(request);
   if (denied) return denied;
+  const [{ localJobRunner }, { localJobStore }] = await Promise.all([
+    import("@/server/job-runner"), import("@/server/job-store"),
+  ]);
   await localJobRunner.initialize();
   const { id } = await context.params;
   const job = await localJobStore.get(id);

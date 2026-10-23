@@ -1,14 +1,17 @@
 import { checkLocalAccess } from "@/server/local-access";
-import { localJobRunner } from "@/server/job-runner";
-import { localJobStore } from "@/server/job-store";
 import { blogSessionCookie } from "@/server/blog-session";
 import { photoSessionCookie } from "@/server/photo-session";
+import { isPublicMode } from "@/server/public-access";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (isPublicMode()) return (await import("@/server/public-api")).retryPublicJob(request, (await context.params).id);
   const denied = checkLocalAccess(request);
   if (denied) return denied;
+  const [{ localJobRunner }, { localJobStore }] = await Promise.all([
+    import("@/server/job-runner"), import("@/server/job-store"),
+  ]);
   const { id } = await context.params;
   const previous = await localJobStore.get(id);
   if (!previous || previous.fullBackup || !previous.articleResults?.some((article) => article.status === "failed")) {

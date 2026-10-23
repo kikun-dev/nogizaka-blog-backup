@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BlogArticlePage, BlogAuthor, BlogGroup } from "@/lib/catalog/types";
 import { emptyPreferences, favoriteKey, parsePreferences, PREFERENCES_KEY, serializePreferences, toggleFavorite, type FavoriteAuthor, type LocalPreferences } from "@/lib/local-preferences";
 import { paginateArticles, type ArticleCursor, type ListedArticle, type SelectionArticlePage } from "@/lib/selection-pages";
-import { ALL_AUTHORS_ID, SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest } from "@/lib/selection";
+import { ALL_AUTHORS_ID, SELECTION_LIMITS, validateSelection, type SelectionContent, type SelectionPlan, type SelectionRange, type SelectionRequest, type SelectionSubmission } from "@/lib/selection";
 import { RemoveSavedItemButton } from "./remove-saved-item-button";
 
 type Stage = "conditions" | "articles";
@@ -23,12 +23,13 @@ function readPreferences(): LocalPreferences {
   catch { return emptyPreferences(); }
 }
 
-export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, onSavePhotos }: {
+export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, onSavePhotos, publicMode = false }: {
   token: string;
+  publicMode?: boolean;
   busy: boolean;
   initialFavorite?: FavoriteAuthor | null;
-  onSaveBlog: (selection: SelectionRequest) => Promise<void>;
-  onSavePhotos: (selection: SelectionRequest) => Promise<void>;
+  onSaveBlog: (selection: SelectionSubmission) => Promise<void>;
+  onSavePhotos: (selection: SelectionSubmission) => Promise<void>;
 }) {
   const [initialPreferences] = useState(readPreferences);
   const [group, setGroup] = useState<BlogGroup>(initialFavorite?.group ?? "nogizaka");
@@ -44,6 +45,7 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
   const [articlePage, setArticlePage] = useState<SelectionArticlePage | null>(null);
   const [selected, setSelected] = useState<Record<string, ListedArticle>>({});
   const [plan, setPlan] = useState<SelectionPlan | null>(null);
+  const [confirmationId, setConfirmationId] = useState<string | null>(null);
   const [loadingAuthors, setLoadingAuthors] = useState(false);
   const [loadingArticles, setLoadingArticles] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -76,6 +78,7 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
     confirmationController.current = null;
     setConfirming(false);
     setPlan(null);
+    setConfirmationId(null);
   }
 
   useEffect(() => () => confirmationController.current?.abort(), [token]);
@@ -253,6 +256,7 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
     confirmationController.current = controller;
     setConfirming(true);
     setPlan(null);
+    setConfirmationId(null);
     setMessage("");
     try {
       const response = await fetch("/api/selections", {
@@ -262,13 +266,17 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
         body: JSON.stringify(request),
         signal: controller.signal,
       });
-      const data = await response.json() as { plan?: SelectionPlan; error?: string };
+      const data = await response.json() as { plan?: SelectionPlan; confirmationId?: string; error?: string };
       if (!response.ok || !data.plan) throw new Error(data.error ?? "取得条件を確認できませんでした。");
+      if (publicMode && (!data.confirmationId || !/^[0-9a-f-]{36}$/i.test(data.confirmationId))) {
+        throw new Error("確認結果を保存できませんでした。もう一度確認してください。");
+      }
       if (JSON.stringify(validateSelection(request)) !== JSON.stringify(validateSelection(data.plan))) {
         throw new Error("確認結果が現在の取得条件と一致しません。もう一度確認してください。");
       }
       if (version === confirmationVersion.current && !controller.signal.aborted) {
         setPlan(data.plan);
+        setConfirmationId(data.confirmationId ?? null);
         setStage("conditions");
       }
     } catch (error) {
@@ -368,7 +376,7 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
             {range === "latest-n" && <div className="count-field"><label htmlFor="selection-count">ブログの件数</label><input id="selection-count" type="number" min="2" max={limit} inputMode="numeric" value={count} onChange={(event) => { invalidateConfirmation(); setCount(event.target.value); }} /><span>件</span></div>}
             <label className="choice-row"><input type="radio" name="selection-range" checked={range === "selected"} onChange={() => changeRange("selected")} /><span><strong>ブログを選ぶ</strong><small>ページを跨いで{limit}件まで</small></span></label>
             {range === "selected" && <div className="select-entry"><span>{selectedCount}件選択中（上限{limit}件）</span><button type="button" className="secondary-button" disabled={!authorValid} onClick={() => { invalidateConfirmation(); setStage("articles"); setMessage(""); }}>ブログ選択へ進む</button></div>}
-            <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog" || groupWide} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{groupWide ? "グループ全体では選べません" : content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>
+            {!publicMode && <label className="choice-row"><input type="radio" name="selection-range" checked={range === "all"} disabled={content !== "blog" || groupWide} onChange={() => changeRange("all")} aria-describedby={range === "all" ? "bulk-range-note" : undefined} /><span><strong>全件バックアップ</strong><small>{groupWide ? "グループ全体では選べません" : content === "blog" ? "このメンバーのブログをすべて保存" : "ブログ保存を選ぶと利用できます"}</small></span></label>}
             {content === "blog" && range === "all" && <div id="bulk-range-note" className="bulk-notice" role="note">
               <strong>全件バックアップについて</strong>
               <p>公式一覧の最後まで自動で取得し、通常は完了後に1つのZIPにまとめます。内部では10件ずつ処理するため、件数に応じて長時間かかります。処理中、ほかの保存ジョブは待機します。</p>
@@ -395,8 +403,8 @@ export function AcquisitionPlanner({ token, busy, initialFavorite, onSaveBlog, o
                 </div>
               )}
               {plan.content === "photos" && plan.range !== "all" ?
-                <button type="button" className="primary-button" disabled={busy} onClick={() => void onSavePhotos(validateSelection(plan))}>{busy ? "取得中…" : `写真を取得（${plan.previewArticles?.length ?? 0}件）`}</button>
-                : plan.content === "blog" ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog(validateSelection(plan))}>{busy ? "保存中…" : plan.range === "all" ? "全件バックアップを開始" : `ブログを保存（${plan.previewArticles?.length ?? 0}件）`}</button>
+                <button type="button" className="primary-button" disabled={busy} onClick={() => void onSavePhotos({ ...validateSelection(plan), ...(publicMode ? { confirmationId: confirmationId! } : {}) })}>{busy ? "取得中…" : `写真を取得（${plan.previewArticles?.length ?? 0}件）`}</button>
+                : plan.content === "blog" ? <button type="button" className="primary-button" disabled={busy} onClick={() => void onSaveBlog({ ...validateSelection(plan), ...(publicMode ? { confirmationId: confirmationId! } : {}) })}>{busy ? "保存中…" : plan.range === "all" ? "全件バックアップを開始" : `ブログを保存（${plan.previewArticles?.length ?? 0}件）`}</button>
                 : null}
             </div>
           )}

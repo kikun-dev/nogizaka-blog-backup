@@ -493,3 +493,33 @@ test("photo job treats zero images as success and retries an article with failed
   assert.equal((await completed(retry.id)).status, "succeeded");
   assert.deepEqual(calls, [["1", "2"], ["2"]]);
 });
+
+test("public blog execution disables persistent cache while local execution keeps its default", async () => {
+  const author = { id: "42", name: "投稿者", group: "nogizaka", type: "member" };
+  const article = { id: "123", title: "記事", date: "2026-10-22",
+    url: "https://www.nogizaka46.com/s/n46/diary/detail/123", author };
+  const cacheSettings = [];
+  const services = {
+    async archiveWebArticles(options) {
+      cacheSettings.push(options.cacheResults);
+      return { saved: [], totalBytes: 0 };
+    },
+    async createBlogZip() { throw new Error("unexpected ZIP"); },
+    async acquirePhotos() { throw new Error("unexpected photos"); },
+    async createPhotoZip() { throw new Error("unexpected photos ZIP"); },
+  };
+  async function run(backupOptions) {
+    let job = { id: "cache-job", articleUrl: article.url, kind: "blog", requestedArticles: [article],
+      requestedAuthor: author, status: "running", outputDirectory: "unused", log: [],
+      createdAt: "2026-10-22T00:00:00Z", updatedAt: "2026-10-22T00:00:00Z" };
+    const store = {
+      async get() { return job; },
+      async update(_id, change) { job = { ...job, ...change }; return job; },
+      async failInterrupted() {},
+    };
+    await new LocalJobRunner(store, undefined, { ...backupOptions, jobServices: services }).executeOne(job);
+  }
+  await run({ cacheResults: false });
+  await run({});
+  assert.deepEqual(cacheSettings, [false, true]);
+});

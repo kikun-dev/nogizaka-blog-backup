@@ -48,8 +48,14 @@ export class LocalJobRunner implements JobRunner {
   constructor(
     private readonly store: JobStore,
     private readonly execute: (job: LocalJob) => Promise<void> = (job) => this.run(job),
-    private readonly backupOptions?: { services?: FullBackupServices; jobServices?: JobServices; articleLimit?: number; byteLimit?: number },
+    private readonly backupOptions?: { services?: FullBackupServices; jobServices?: JobServices; articleLimit?: number; byteLimit?: number; photoByteLimit?: number; cacheResults?: boolean },
   ) {}
+
+  // The public worker claims jobs in Postgres and executes the same acquisition
+  // engine without entering the local in-process queue.
+  async executeOne(job: LocalJob): Promise<void> {
+    await this.run(job);
+  }
 
   async initialize() {
     this.pendingInitializations++;
@@ -221,7 +227,7 @@ export class LocalJobRunner implements JobRunner {
           await this.store.update(job.id, { photoArticles: results, articleResults,
             savedCount: articleResults.filter((article) => article.status === "succeeded").length,
             currentArticle: current ? { title: current.title, date: current.date } : undefined });
-        });
+        }, this.backupOptions?.photoByteLimit ? { maxTotalBytes: this.backupOptions.photoByteLimit } : {});
         let photoZipReady = false;
         try { photoZipReady = await createPhotoZip(job.outputDirectory, photoArticles); }
         catch (error) { console.error("Failed to create photo ZIP", error); }
@@ -244,6 +250,7 @@ export class LocalJobRunner implements JobRunner {
         articles: job.requestedArticles ?? [{ url: job.articleUrl }],
         output: job.outputDirectory,
         author: job.requestedAuthor,
+        cacheResults: this.backupOptions?.cacheResults ?? true,
       }, {
         logger: { log: (line: string) => { log.push(line); }, warn: (line: string) => { log.push(line); } },
         continueOnError: true,

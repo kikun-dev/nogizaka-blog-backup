@@ -1,12 +1,13 @@
-import { getArticlePage, getAuthors, groupSelectionAuthor } from "@/server/catalog";
 import { ArticleAuthorError } from "@/server/catalog/adapters";
 import { checkLocalAccess } from "@/server/local-access";
+import { isPublicMode, requirePublicSession } from "@/server/public-access";
 import { ALL_AUTHORS_ID, SELECTION_LIMITS, SelectionError, collectBulkBatch, collectLatestArticles, validateSelection, verifySelectedArticles } from "@/lib/selection";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const denied = checkLocalAccess(request);
+  const session = isPublicMode() ? await requirePublicSession(request) : null;
+  const denied = session && "denied" in session ? session.denied : !session ? checkLocalAccess(request) : null;
   if (denied) return denied;
 
   let selection;
@@ -14,11 +15,17 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 64_000) return Response.json({ error: "取得条件が大きすぎます。" }, { status: 413 });
     selection = validateSelection(JSON.parse(raw));
+    if (isPublicMode() && selection.range === "all") {
+      return Response.json({ error: "公開版では全件バックアップを利用できません。" }, { status: 400 });
+    }
   } catch (error) {
     return Response.json({ error: error instanceof SelectionError ? error.message : "取得条件を確認してください。" }, { status: 400 });
   }
 
+  if (isPublicMode()) return (await import("@/server/public-catalog-api")).publicCatalogResponse(request,
+    { kind: "selection", selection });
   try {
+    const { getArticlePage, getAuthors, groupSelectionAuthor } = await import("@/server/catalog");
     const author = selection.authorId === ALL_AUTHORS_ID
       ? groupSelectionAuthor(selection.group)
       : (await getAuthors(selection.group)).find(({ id }) => id === selection.authorId);

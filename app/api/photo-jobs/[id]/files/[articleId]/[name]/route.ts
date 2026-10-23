@@ -1,13 +1,18 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { localJobStore } from "@/server/job-store";
 import { checkPhotoSession } from "@/server/photo-session";
+import { isPublicMode } from "@/server/public-access";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string; articleId: string; name: string }> }) {
+  if (isPublicMode()) {
+    const { id, articleId, name } = await context.params;
+    return (await import("@/server/public-api")).publicArtifactRedirect(request, id, "photo", articleId, name);
+  }
   const denied = checkPhotoSession(request);
   if (denied) return denied;
+  const { localJobStore } = await import("@/server/job-store");
   const { id, articleId, name } = await context.params;
   const job = await localJobStore.get(id);
   const photo = job?.kind === "photos" && job.photoArticles?.find((article) => article.id === articleId)?.photos.find((item) => item.name === name);

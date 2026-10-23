@@ -1,5 +1,5 @@
 import { chromium, type Page } from "playwright";
-import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { BlogArticle, BlogGroup } from "@/lib/catalog/types";
 import { normalizeArticleUrl } from "@/lib/archive/urls.mjs";
@@ -135,9 +135,12 @@ export async function savePhotoSource(
   }
 }
 
-export async function acquirePhotos(articles: BlogArticle[], outputDirectory: string, onProgress?: (results: PhotoArticle[], current?: BlogArticle) => Promise<void>): Promise<PhotoArticle[]> {
+export async function acquirePhotos(articles: BlogArticle[], outputDirectory: string,
+  onProgress?: (results: PhotoArticle[], current?: BlogArticle) => Promise<void>,
+  { maxTotalBytes }: { maxTotalBytes?: number } = {}): Promise<PhotoArticle[]> {
   const browser = await chromium.launch({ headless: true });
   const results: PhotoArticle[] = [];
+  let totalBytes = 0;
   try {
     for (const article of articles) {
       await onProgress?.([...results], article);
@@ -148,6 +151,10 @@ export async function acquirePhotos(articles: BlogArticle[], outputDirectory: st
       };
       results.push(result);
       try {
+        if (maxTotalBytes !== undefined && totalBytes >= maxTotalBytes) {
+          result.error = "写真の保存容量が上限に達しました。";
+          continue;
+        }
         const page = await context.newPage();
         const expected = normalizeArticleUrl(article.url, undefined, article.author.group);
         const response = await page.goto(expected, { waitUntil: "domcontentloaded", timeout: 60_000 });
@@ -173,15 +180,20 @@ export async function acquirePhotos(articles: BlogArticle[], outputDirectory: st
           for (const url of candidate.urls) {
             try {
               if (seen.has(url)) { saved = { name: "", mimeType: "" }; break; }
-              const image = await savePhotoSource(url, article.author.group, page.url(), directory, result.photos.length + 1);
+              const remaining = maxTotalBytes === undefined ? MAX_IMAGE_BYTES : Math.min(MAX_IMAGE_BYTES, maxTotalBytes - totalBytes);
+              if (remaining <= 0) { result.error = "写真の保存容量が上限に達しました。"; break; }
+              const image = await savePhotoSource(url, article.author.group, page.url(), directory, result.photos.length + 1,
+                { maxBytes: remaining });
               if (!image) continue;
               seen.add(url);
               saved = image;
               result.photos.push(saved);
+              totalBytes += (await stat(path.join(directory, image.name))).size;
               break;
             } catch { /* Try the next candidate, then count a failure. */ }
           }
           if (!saved) result.failed += 1;
+          if (result.error) break;
         }
         result.failed += Math.max(0, candidates.length - MAX_PHOTOS_PER_ARTICLE);
       } catch (error) {
