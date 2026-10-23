@@ -1,6 +1,6 @@
 import { validateSelection, SelectionError, type SelectionContent } from "@/lib/selection";
 import { checkWriteOrigin, requirePublicSession } from "./public-access";
-import { enqueuePublicJob, getArtifact, getOwnedPublicJob, publicJobView, recoverStaleJobs, workerLastSeen } from "./public-store";
+import { enqueuePublicJob, getArtifact, getOwnedPublicJob, isActiveAccessSession, publicJobView, recoverStaleJobs, workerLastSeen } from "./public-store";
 import { signedArtifactUrl } from "./public-r2";
 import { publicZipFilename } from "./public-download-name";
 import { confirmedJobRequest } from "./public-confirmation";
@@ -8,6 +8,9 @@ import { getCatalogQuery } from "./public-store";
 
 function submissionError(error: unknown): Response {
   const message = error instanceof Error ? error.message : "ジョブを作成できませんでした。";
+  if (/session_expired/.test(message)) {
+    return Response.json({ error: "アクセスコードを入力してください。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
   if (/session_capacity|global_capacity|submit_cooldown/.test(message)) {
     const reason = message.includes("session_capacity") ? "このセッションには処理中のジョブがあります。"
       : message.includes("submit_cooldown") ? "続けて開始する前に少し待ってください。"
@@ -100,6 +103,13 @@ export async function publicArtifactRedirect(request: Request, id: string,
   }
   const artifact = await getArtifact(id, kind, articleId, name);
   if (!artifact) return Response.json({ error: "成果物の保存期限が切れたか、見つかりません。" }, { status: 404 });
+  try {
+    if (!await isActiveAccessSession(session.id)) {
+      return Response.json({ error: "アクセスコードを入力してください。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    }
+  } catch {
+    return Response.json({ error: "ジョブ保存先に接続できません。管理者に確認してください。" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   const filename = kind === "photo" ? undefined : publicZipFilename(job);
   const url = await signedArtifactUrl(artifact.object_key, filename);
   return new Response(null, { status: 302, headers: {

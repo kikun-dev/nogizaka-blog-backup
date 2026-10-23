@@ -1,26 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkWriteOrigin, isPublicMode, verifySharedCode } from "../server/public-access";
+import { checkWriteOrigin, isPublicMode, loginWithAccessCode } from "../server/public-access";
 
-test("public access code is checked without using the local bearer token", () => {
+test("public access mode does not accept the retired shared environment code", async () => {
   const mode = process.env.APP_MODE;
-  const code = process.env.SHARED_ACCESS_CODE;
+  const oldCode = process.env.SHARED_ACCESS_CODE;
+  const secret = process.env.SUPABASE_SECRET_KEY;
   const local = process.env.LOCAL_ACCESS_TOKEN;
   const vercel = process.env.VERCEL;
   try {
     process.env.APP_MODE = "public";
     process.env.SHARED_ACCESS_CODE = "a-long-shared-access-code";
+    delete process.env.SUPABASE_SECRET_KEY;
     process.env.LOCAL_ACCESS_TOKEN = "a-different-local-token";
     assert.equal(isPublicMode(), true);
-    assert.equal(verifySharedCode("a-long-shared-access-code"), true);
-    assert.equal(verifySharedCode("a-different-local-token"), false);
-    assert.equal(verifySharedCode("wrong"), false);
+    const response = await loginWithAccessCode("a-long-shared-access-code", new Request("https://app.example/api/access-session", { method: "POST" }));
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: "アクセスコードを確認してください。" });
     delete process.env.APP_MODE;
     process.env.VERCEL = "1";
     assert.equal(isPublicMode(), true);
   } finally {
     if (mode === undefined) delete process.env.APP_MODE; else process.env.APP_MODE = mode;
-    if (code === undefined) delete process.env.SHARED_ACCESS_CODE; else process.env.SHARED_ACCESS_CODE = code;
+    if (oldCode === undefined) delete process.env.SHARED_ACCESS_CODE; else process.env.SHARED_ACCESS_CODE = oldCode;
+    if (secret === undefined) delete process.env.SUPABASE_SECRET_KEY; else process.env.SUPABASE_SECRET_KEY = secret;
     if (local === undefined) delete process.env.LOCAL_ACCESS_TOKEN; else process.env.LOCAL_ACCESS_TOKEN = local;
     if (vercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = vercel;
   }
