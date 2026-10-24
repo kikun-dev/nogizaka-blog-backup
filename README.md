@@ -91,8 +91,11 @@ CLI は `lib/archive/index.mjs` の `archiveArticles()` を呼びます。同じ
 npm run lint
 npm run typecheck
 npm test
+npm run test:ui
 npm run build
 ```
+
+`test:ui` はローカルの Next.js と Playwright Chromium を起動し、公開 API の応答をテスト内で差し替えて画面状態を検証します。Supabase・R2 には接続しません。初回はセットアップ手順どおり Chromium をインストールしてください。
 
 ローカル実行役と取得処理の境界は `server/job-runner.ts` です。公開モードでは Web API は取得処理を実行せず、Supabase のジョブをローカル PC 上の独立した Node.js ワーカーが取得して共通エンジンを呼びます。
 

@@ -172,8 +172,9 @@ export async function getPublicJob(id: string): Promise<PublicJobRow | null> {
   return data as PublicJobRow | null;
 }
 
-export async function getOwnedPublicJob(id: string, ownerId: string): Promise<PublicJobRow | null> {
-  const job = await getPublicJob(id);
+export async function getOwnedPublicJob(id: string, ownerId: string,
+  lookup: typeof getPublicJob = getPublicJob): Promise<PublicJobRow | null> {
+  const job = await lookup(id);
   return job?.owner_session_id === ownerId ? job : null;
 }
 

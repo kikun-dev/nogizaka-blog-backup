@@ -159,10 +159,12 @@ test("the owner session remains valid through processing and artifact expiry", a
     const artifact = JSON.stringify([{ kind: "blog_zip", object_key: `${jobId}/1/blogs.zip`, mime_type: "application/zip", byte_size: 123 }]);
     const completed = await db.query("select public.complete_job($1,$2,1,'succeeded','{}'::jsonb,null,$3::jsonb) as accepted", [jobId, worker, artifact]);
     assert.equal(completed.rows[0].accepted, true);
-    const access = await db.query(`select session.expires_at >= artifact.expires_at as covered
+    const access = await db.query(`select session.expires_at >= artifact.expires_at as covered,
+      artifact.expires_at = job.finished_at + interval '24 hours' as lasts_one_day
       from public.access_sessions as session join public.jobs as job on job.owner_session_id=session.id
       join public.artifacts as artifact on artifact.job_id=job.id where job.id=$1`, [jobId]);
     assert.equal(access.rows[0].covered, true);
+    assert.equal(access.rows[0].lasts_one_day, true);
   } finally { await db.close(); }
 });
 
@@ -212,6 +214,32 @@ test("old lease generation cannot register artifacts or finish a newer attempt",
     const after = await db.query("select lease_generation,object_key from public.artifacts where job_id=$1", [jobId]);
     assert.equal(after.rows.length, 1);
     assert.equal(after.rows[0].lease_generation, 2);
+  } finally { await db.close(); }
+});
+
+test("a queued job can be claimed after worker downtime, while an expired lease cannot finish", async () => {
+  const db = await database();
+  try {
+    const session = await db.query("insert into public.access_sessions(token_hash,access_code_id,expires_at) values ('worker-resume',$1,now()+interval '1 day') returning id", [CODE_ID]);
+    const first = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [session.rows[0].id]);
+    const firstId = first.rows[0].id;
+    const waiting = await db.query("select status from public.jobs where id=$1", [firstId]);
+    assert.equal(waiting.rows[0].status, "queued");
+    const worker = "33333333-3333-4333-8333-333333333333";
+    const claimed = await db.query("select (public.claim_job($1)).id as id", [worker]);
+    assert.equal(claimed.rows[0].id, firstId);
+    assert.equal((await db.query("select public.complete_job($1,$2,1,'succeeded','{}'::jsonb,null,'[]'::jsonb) as ok", [firstId, worker])).rows[0].ok, true);
+    assert.equal((await db.query("select status from public.jobs where id=$1", [firstId])).rows[0].status, "succeeded");
+    await db.query("update public.jobs set created_at=now()-interval '11 seconds' where id=$1", [firstId]);
+
+    const second = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [session.rows[0].id]);
+    const secondId = second.rows[0].id;
+    assert.equal((await db.query("select (public.claim_job($1)).id as id", [worker])).rows[0].id, secondId);
+    await db.query("update public.jobs set lease_expires_at=now()-interval '1 second' where id=$1", [secondId]);
+    await db.query("select public.recover_stale_jobs()");
+    assert.equal((await db.query("select status from public.jobs where id=$1", [secondId])).rows[0].status, "failed");
+    assert.equal((await db.query("select public.complete_job($1,$2,1,'succeeded','{}'::jsonb,null,'[]'::jsonb) as ok", [secondId, worker])).rows[0].ok, false);
+    assert.equal((await db.query("select status from public.jobs where id=$1", [secondId])).rows[0].status, "failed");
   } finally { await db.close(); }
 });
 
@@ -275,6 +303,8 @@ test("code creation stores only a hash and login creates an expiring code-bound 
     const job = await db.query("select (public.enqueue_job($1,'blog','{}'::jsonb)).id as id", [login.rows[0].id]);
     const query = await db.query("select (public.enqueue_catalog_query($1,'{\"kind\":\"authors\",\"group\":\"nogizaka\"}'::jsonb)).id as id", [login.rows[0].id]);
     await db.query("update public.access_codes set created_at=now()-interval '2 seconds',expires_at=now()-interval '1 second' where id=$1", [created.rows[0].id]);
+    const deniedLogin = await db.query("select public.authenticate_access_code($1,$2,$3) as id", [hash, "9".repeat(64), "8".repeat(64)]);
+    assert.equal(deniedLogin.rows[0].id, null);
     const expired = await db.query("select public.find_access_session($1) as id", [tokenHash]);
     assert.equal(expired.rows[0].id, null);
     await db.query("update public.access_sessions set expires_at=now()+interval '1 day' where id=$1", [login.rows[0].id]);
