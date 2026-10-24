@@ -167,6 +167,9 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
             setReadyToken("");
             setJob(null);
             setView("setup");
+            setMessage("アクセスの期限が切れました。アクセスコードをもう一度入力してください。");
+            window.clearInterval(timer);
+            return;
           }
           const failure = await response.json().catch(() => ({})) as { error?: string };
           throw new Error(failure.error ?? "状態を確認できませんでした。画面を再読み込みしてください。");
@@ -363,9 +366,9 @@ export function LocalJobForm({ publicMode = false }: { publicMode?: boolean }) {
       {job && <button type="button" className="secondary-button photo-reopen" onClick={() => setView(job.kind === "photos" ? "photos" : "blog")}>{job.kind === "photos" ? "写真の取得結果を見る" : "ブログの保存結果を見る"}</button>}
       {!publicMode && savedBulkJobId && readyToken && <button type="button" className="secondary-button photo-reopen" disabled={busy} onClick={() => void resumeBulkJob()}>前回の全件バックアップの結果を見る・再開する</button>}
       {publicMode && readyToken ? <p className="field-help" role="status">アクセスを確認しました。保存後は早めにダウンロードしてください。アプリでの期限は保存完了から24時間です。</p> : <div className="token-field">
-        <label htmlFor="access-token">{publicMode ? "共有アクセスコード" : "ローカルアクセストークン"}</label>
+        <label htmlFor="access-token">{publicMode ? "あなたのアクセスコード" : "ローカルアクセストークン"}</label>
         <input ref={tokenRef} id="access-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => { if (readyToken) setPendingFavorite(null); setAccessToken(event.target.value); setReadyToken(""); }} aria-describedby="token-help" />
-        <p id="token-help" className="field-help">{publicMode ? "共有されたアクセスコードを入力してください。" : "開発PCの .env.local に設定したトークンを入力してください。"}</p>
+        <p id="token-help" className="field-help">{publicMode ? "管理者から個別に受け取ったコードを入力してください。" : "開発PCの .env.local に設定したトークンを入力してください。"}</p>
         {publicMode && !readyToken && <button type="button" className="secondary-button" onClick={() => void loginPublic()}>アクセスする</button>}
       </div>}
       {message && view === "setup" && <p className="form-message" role="alert">{message}</p>}

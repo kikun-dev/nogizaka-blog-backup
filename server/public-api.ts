@@ -53,25 +53,43 @@ export async function submitPublicSelection(request: Request, kind: SelectionCon
   }
 }
 
-export async function publicJobStatus(request: Request, id: string): Promise<Response> {
-  const session = await requirePublicSession(request);
+type StatusDependencies = {
+  requireSession: typeof requirePublicSession;
+  recoverJobs: typeof recoverStaleJobs;
+  getOwnedJob: typeof getOwnedPublicJob;
+  lastWorkerSeen: typeof workerLastSeen;
+};
+
+export async function publicJobStatus(request: Request, id: string, deps: StatusDependencies = {
+  requireSession: requirePublicSession, recoverJobs: recoverStaleJobs,
+  getOwnedJob: getOwnedPublicJob, lastWorkerSeen: workerLastSeen,
+}): Promise<Response> {
+  const session = await deps.requireSession(request);
   if ("denied" in session) return session.denied;
   try {
-    await recoverStaleJobs();
-    const row = await getOwnedPublicJob(id, session.id);
+    await deps.recoverJobs();
+    const row = await deps.getOwnedJob(id, session.id);
     if (!row) return Response.json({ error: "ジョブが見つかりません。" }, { status: 404 });
-    const seen = row.status === "queued" ? await workerLastSeen() : null;
+    const seen = row.status === "queued" ? await deps.lastWorkerSeen() : null;
     const workerOffline = row.status === "queued" && (!seen || Date.now() - Date.parse(seen) > 45_000);
     return Response.json({ job: publicJobView(row), workerOffline }, { headers: { "Cache-Control": "no-store" } });
   } catch { return Response.json({ error: "ジョブ保存先に接続できません。管理者に確認してください。" }, { status: 503 }); }
 }
 
-export async function retryPublicJob(request: Request, id: string): Promise<Response> {
+type RetryDependencies = {
+  requireSession: typeof requirePublicSession;
+  getOwnedJob: typeof getOwnedPublicJob;
+  enqueueJob: typeof enqueuePublicJob;
+};
+
+export async function retryPublicJob(request: Request, id: string, deps: RetryDependencies = {
+  requireSession: requirePublicSession, getOwnedJob: getOwnedPublicJob, enqueueJob: enqueuePublicJob,
+}): Promise<Response> {
   const originDenied = checkWriteOrigin(request);
   if (originDenied) return originDenied;
-  const session = await requirePublicSession(request);
+  const session = await deps.requireSession(request);
   if ("denied" in session) return session.denied;
-  const previous = await getOwnedPublicJob(id, session.id);
+  const previous = await deps.getOwnedJob(id, session.id);
   if (!previous || !["partial", "failed"].includes(previous.status)) {
     return Response.json({ error: "再試行できるジョブが見つかりません。" }, { status: 404 });
   }
@@ -84,16 +102,28 @@ export async function retryPublicJob(request: Request, id: string): Promise<Resp
     ? { retryArticles: articles, author: state.requestedAuthor } : previous.status === "failed" ? previous.request : null;
   if (!nextRequest) return Response.json({ error: "再試行できる記事が見つかりません。" }, { status: 404 });
   try {
-    const row = await enqueuePublicJob(session.id, previous.kind, nextRequest, id);
+    const row = await deps.enqueueJob(session.id, previous.kind, nextRequest, id);
     return Response.json({ job: publicJobView(row) }, { status: 202, headers: { "Cache-Control": "no-store" } });
   } catch (error) { return submissionError(error); }
 }
 
+type ArtifactDependencies = {
+  requireSession: typeof requirePublicSession;
+  getOwnedJob: typeof getOwnedPublicJob;
+  findArtifact: typeof getArtifact;
+  activeSession: typeof isActiveAccessSession;
+  signUrl: typeof signedArtifactUrl;
+};
+
 export async function publicArtifactRedirect(request: Request, id: string,
-  kind: "blog_zip" | "photo_zip" | "photo", articleId?: string, name?: string): Promise<Response> {
-  const session = await requirePublicSession(request);
+  kind: "blog_zip" | "photo_zip" | "photo", articleId?: string, name?: string,
+  deps: ArtifactDependencies = {
+    requireSession: requirePublicSession, getOwnedJob: getOwnedPublicJob,
+    findArtifact: getArtifact, activeSession: isActiveAccessSession, signUrl: signedArtifactUrl,
+  }): Promise<Response> {
+  const session = await deps.requireSession(request);
   if ("denied" in session) return session.denied;
-  const job = await getOwnedPublicJob(id, session.id);
+  const job = await deps.getOwnedJob(id, session.id);
   if (!job || !["succeeded", "partial"].includes(job.status)) {
     return Response.json({ error: "成果物が見つかりません。" }, { status: 404 });
   }
@@ -101,17 +131,19 @@ export async function publicArtifactRedirect(request: Request, id: string,
     || !/^photo-\d{3}\.(jpg|png|webp|gif|avif)$/.test(name))) {
     return Response.json({ error: "写真が見つかりません。" }, { status: 404 });
   }
-  const artifact = await getArtifact(id, kind, articleId, name);
-  if (!artifact) return Response.json({ error: "成果物の保存期限が切れたか、見つかりません。" }, { status: 404 });
+  const artifact = await deps.findArtifact(id, kind, articleId, name);
+  if (!artifact || !(Date.parse(artifact.expires_at) > Date.now())) {
+    return Response.json({ error: "成果物の保存期限が切れたか、見つかりません。" }, { status: 404 });
+  }
   try {
-    if (!await isActiveAccessSession(session.id)) {
+    if (!await deps.activeSession(session.id)) {
       return Response.json({ error: "アクセスコードを入力してください。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
   } catch {
     return Response.json({ error: "ジョブ保存先に接続できません。管理者に確認してください。" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
   const filename = kind === "photo" ? undefined : publicZipFilename(job);
-  const url = await signedArtifactUrl(artifact.object_key, filename);
+  const url = await deps.signUrl(artifact.object_key, filename);
   return new Response(null, { status: 302, headers: {
     Location: url, "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
   } });

@@ -13,7 +13,8 @@ export function isPublicMode(): boolean {
   return process.env.APP_MODE === "public" || process.env.VERCEL === "1" || Boolean(process.env.VERCEL_ENV);
 }
 
-export async function loginWithAccessCode(code: unknown, request: Request): Promise<Response> {
+export async function loginWithAccessCode(code: unknown, request: Request,
+  authenticate: typeof authenticateAccessCode = authenticateAccessCode): Promise<Response> {
   const secret = process.env.SUPABASE_SECRET_KEY;
   if (!secret || typeof code !== "string" || code.length > 2048) {
     return Response.json({ error: "アクセスコードを確認してください。" }, { status: 401, headers: { "Cache-Control": "no-store" } });
@@ -23,7 +24,7 @@ export async function loginWithAccessCode(code: unknown, request: Request): Prom
   const rateKey = createHmac("sha256", secret).update(clientAddress).digest("hex");
   let session;
   try {
-    session = await authenticateAccessCode(createHash("sha256").update(code).digest("hex"), rateKey);
+    session = await authenticate(createHash("sha256").update(code).digest("hex"), rateKey);
   } catch {
     return Response.json({ error: "ジョブ保存先に接続できません。管理者に確認してください。" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
